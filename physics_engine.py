@@ -54,15 +54,17 @@ import numpy as np
 
 @dataclass
 class Material:
-    name: str = "E250 Steel (IS 2062)"
+    """Steel. Only the elastic constants have defaults (E = 210000 N/mm^2,
+    nu = 0.3 -> G = 80769 N/mm^2); fy and fu must be supplied by the user."""
+    fy: float                    # N/mm^2, no default
+    fu: float                    # N/mm^2, no default
     E: float = 210000.0          # N/mm^2
     nu: float = 0.3
-    fy: float = 250.0            # N/mm^2
-    fu: float = 410.0            # N/mm^2
+    name: str = "Steel"
 
     @property
     def G(self) -> float:
-        return self.E / (2.0 * (1.0 + self.nu))
+        return self.E / (2.0 * (1.0 + self.nu))   # 80769 N/mm^2 for defaults
 
 
 @dataclass

@@ -33,6 +33,10 @@ python -m pytest -q tests     # engine checks
 Width 44 mm, pitch 50 mm, hole edge 10.3 mm from the top, 34.7 mm bottom end
 distance. The engaged lip height is inferred as 2·(25.1 − 10.3) = 29.6 mm.
 
+## Material
+The default material is steel with E = 210000 N/mm², ν = 0.3 and G = E/2(1+ν) = 80769 N/mm².
+The yield strength fy and ultimate strength fu have **no default** and must be entered before a test runs.
+
 ## Algorithm (component method, EN 1993-1-8 adapted to hook rows)
 1. **Section properties**
    * Beam: `I_b` and `W_pl` (box, solid, or custom values).

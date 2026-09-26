@@ -31,12 +31,14 @@ with st.sidebar:
     st.header("⚙️ Input Parameters")
 
     st.subheader("1. Material")
-    mat_name = st.text_input("Material", "E250 Steel (IS 2062)")
+    mat_name = st.text_input("Material", "Steel")
     c1, c2 = st.columns(2)
     E = c1.number_input("E (N/mm²)", 50000.0, 300000.0, 210000.0, 1000.0)
     nu = c2.number_input("ν", 0.1, 0.5, 0.3, 0.01)
-    fy = c1.number_input("fy (N/mm²)", 100.0, 1000.0, 250.0, 5.0)
-    fu = c2.number_input("fu (N/mm²)", 100.0, 1200.0, 410.0, 5.0)
+    fy = c1.number_input("fy (N/mm²) *", 100.0, 1000.0, None, 5.0,
+                         placeholder="required")
+    fu = c2.number_input("fu (N/mm²) *", 100.0, 1200.0, None, 5.0,
+                         placeholder="required")
     st.caption(f"G = E / 2(1+ν) = **{E / (2 * (1 + nu)):.0f} N/mm²**")
 
     st.subheader("2. Beam")
@@ -113,6 +115,13 @@ with st.sidebar:
     eta_S = st.number_input("Stiffness modification η for S_j = S_j,ini/η",
                             1.0, 3.5, 2.0, 0.1)
 
+if fy is None or fu is None:
+    st.warning("Enter the yield strength fy and ultimate strength fu of the "
+               "steel in the sidebar (section 1) to run the test.")
+    st.stop()
+if fu < fy:
+    st.error("fu must be greater than or equal to fy.")
+    st.stop()
 if x3 <= x2:
     st.error("D3 must be further from the upright than D2.")
     st.stop()
@@ -121,7 +130,7 @@ if x3 <= x2:
 # RUN
 # ============================================================
 sim = HookConnectorSPM(
-    Material(mat_name, E, nu, fy, fu),
+    Material(fy=fy, fu=fu, E=E, nu=nu, name=mat_name),
     BeamSection(beam_type, beam_h, beam_b, beam_t, I_cust, W_cust,
                 span_for_classification=beam_Lb),
     UprightSection(up_B, up_D, up_c, up_t, up_perf, None, up_H, up_fix),

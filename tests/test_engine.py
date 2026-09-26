@@ -7,9 +7,13 @@ from physics_engine import (
 )
 
 
+# Test-only strengths; the engine has no default fy / fu.
+MAT = Material(fy=350.0, fu=450.0)
+
+
 def make(n_lips=5, **nl):
     return HookConnectorSPM(
-        Material(), BeamSection(), UprightSection(), HookConnector(n_lips=n_lips),
+        MAT, BeamSection(), UprightSection(), HookConnector(n_lips=n_lips),
         ComponentParameters(), TestRig(), LoadSchedule(),
         NonlinearOptions(**nl), Evaluation())
 
@@ -45,3 +49,8 @@ def test_sensors_monotonic_and_ordered():
     assert np.all(np.diff(D1) >= 0)
     # D1 piston @ 400 > D3 @ 140 > D2 @ 40 mm from the upright face
     assert np.all(D1 >= D3) and np.all(D3 >= D2)
+
+
+def test_default_steel_elastic_constants():
+    m = Material(fy=1.0, fu=1.0)
+    assert (m.E, m.nu, round(m.G)) == (210000.0, 0.3, 80769)
