@@ -37,6 +37,30 @@ distance. The engaged lip height is inferred as 2·(25.1 − 10.3) = 29.6 mm.
 The default material is steel with E = 210000 N/mm², ν = 0.3 and G = E/2(1+ν) = 80769 N/mm².
 The yield strength fy and ultimate strength fu have **no default** and must be entered before a test runs.
 
+## Required inputs (no defaults)
+The app does not run until these are entered:
+* Steel fy and fu
+* Beam section: depth h_b, plus width and wall thickness (box / solid) or I and W_pl (custom)
+* Upright section: slotted face width, side-wall depth, return lip, thickness t_u
+* Maximum deflection at which the test stops
+
+## Beam position on the connector
+The connector extends 55 mm above the beam top and 55 mm below the beam bottom.
+If 55 + h_b + 55 does not equal the connector height, the app warns and positions the beam by the "above" distance.
+Downward load pulls the top lips out and presses the connector against the upright below.
+By default the centre of compression is at the beam bottom flange (EN 1993-1-8). The connector bottom edge is an alternative.
+Lips at or below the centre of compression carry no tension.
+
+## Test procedure and stop condition
+1. The load rises in 0.01 or 0.02 kN steps. The dials are zeroed at the optional initial load.
+2. The test stops when the chosen dial (Dial 1, the piston, by default) reaches the maximum deflection. The final step is bisected so the reading lands exactly on the limit.
+3. If the connection (or beam) capacity is reached first, the load is held at its peak while the deflection grows in dial-resolution steps up to the limit.
+
+## Output CSV (machine format)
+`Load 1 kN, Dial 1 mm, Dial 2 mm, Dial 3 mm, Time Sec.`
+* Dials are rounded to the dial resolution (0.01 mm) and load to 0.001 kN.
+* A detailed CSV adds moment, rotations and the force in each lip.
+
 ## Algorithm (component method, EN 1993-1-8 adapted to hook rows)
 1. **Section properties**
    * Beam: `I_b` and `W_pl` (box, solid, or custom values).
@@ -52,7 +76,7 @@ The yield strength fy and ultimate strength fu have **no default** and must be e
 3. **Row in series**
    * Stiffness: `k_eff,r = 1/Σ(1/K_i)`
    * Resistance: `F_Rd,r = min F_i,Rd`. The component that gives the minimum is reported as the governing component.
-4. **Assembly about the centre of compression** (the bottom of the connector)
+4. **Assembly about the centre of compression** (see above; tension lips only)
    * Lever arm of each lip: `z_r = h_c − y_r`
    * Initial rotational stiffness: `S_j,ini = Σ k_eff,r z_r²`
    * Moment resistance: `M_j,Rd = Σ F_Rd,r z_r`

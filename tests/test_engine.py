@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from physics_engine import (
     BeamSection, ComponentParameters, Evaluation, HookConnector,
@@ -6,16 +7,22 @@ from physics_engine import (
     UprightSection,
 )
 
-
-# Test-only strengths; the engine has no default fy / fu.
+# Test-only inputs: the engine has no defaults for these.
 MAT = Material(fy=350.0, fu=450.0)
+UPRIGHT = UprightSection(face_width=90.0, depth=70.0, lip=20.0, thickness=2.0)
 
 
-def make(n_lips=5, **nl):
+def make(n_lips=5, d_max=20.0, beam_depth=135.0, cc="beam_bottom", P0=0.0, **nl):
     return HookConnectorSPM(
-        MAT, BeamSection(), UprightSection(), HookConnector(n_lips=n_lips),
-        ComponentParameters(), TestRig(), LoadSchedule(),
-        NonlinearOptions(**nl), Evaluation())
+        MAT, BeamSection("box", beam_depth, 50.0, 1.6), UPRIGHT,
+        HookConnector(n_lips=n_lips), ComponentParameters(),
+        TestRig(max_deflection_mm=d_max, compression_centre=cc),
+        LoadSchedule(initial_load_kN=P0), NonlinearOptions(**nl), Evaluation())
+
+
+def test_default_steel_elastic_constants():
+    m = Material(fy=1.0, fu=1.0)
+    assert (m.E, m.nu, round(m.G)) == (210000.0, 0.3, 80769)
 
 
 def test_connector_geometry():
@@ -26,31 +33,51 @@ def test_connector_geometry():
     assert np.isclose(HookConnector().lip_height, 29.6)
 
 
+def test_compression_centre_and_tension_rows():
+    # 5 lips, beam 135 deep, 55 above -> beam bottom 190 mm (flange mid 189.2)
+    sim = make()
+    assert np.isclose(sim.compression_centre_from_top, 55 + 135 - 0.8)
+    assert [r.in_tension for r in sim.rows] == [True, True, True, True, False]
+    assert np.isclose(make(cc="connector_bottom").compression_centre_from_top, 245.0)
+
+
 def test_equal_area_recovers_linear_slope():
     th = np.linspace(0, 0.01, 200)
     assert np.isclose(HookConnectorSPM.equal_area_stiffness(th, 1e8 * th, 5e5), 1e8)
 
 
 def test_more_lips_stiffer_and_stronger():
-    r3, r5 = make(3).run(), make(5).run()
+    r3 = make(3, beam_depth=35.0).run()
+    r5 = make(5, beam_depth=135.0).run()
     assert r5["S_j_ini_Nmm_rad"] > r3["S_j_ini_Nmm_rad"]
     assert r5["M_j_Rd_Nmm"] > r3["M_j_Rd_Nmm"]
 
 
 def test_small_load_rotation_matches_component_stiffness():
     sim = make(looseness_rad=0.0)
-    M = 0.05 * sim.M_j_Rd   # well inside the elastic range
+    M = 0.05 * sim.M_j_Rd
     assert np.isclose(sim.theta_connection(M), M / sim.S_j_ini, rtol=1e-3)
+
+
+@pytest.mark.parametrize("d_max", [0.5, 200.0])
+def test_stops_exactly_at_max_deflection(d_max):
+    res = make(d_max=d_max).run()
+    D1 = np.array(res["record"]["D1"])
+    assert np.isclose(D1[-1], d_max, atol=1e-6)
+    assert np.all(D1[:-1] < d_max)
+    # small limit is reached while loading, large one after the peak
+    assert res["peak_reached"] == (d_max == 200.0)
+
+
+def test_dials_zeroed_at_initial_load():
+    rec = make(P0=0.504).run()["record"]
+    assert rec["P"][0] == pytest.approx(504.0)
+    assert rec["D1"][0] == rec["D2"][0] == rec["D3"][0] == 0.0
 
 
 def test_sensors_monotonic_and_ordered():
     rec = make().run()["record"]
     D1, D2, D3 = map(np.array, (rec["D1"], rec["D2"], rec["D3"]))
-    assert np.all(np.diff(D1) >= 0)
-    # D1 piston @ 400 > D3 @ 140 > D2 @ 40 mm from the upright face
+    assert np.all(np.diff(D1) >= -1e-12)
+    # Dial 1 piston @ 400 > Dial 3 @ 140 > Dial 2 @ 40 mm
     assert np.all(D1 >= D3) and np.all(D3 >= D2)
-
-
-def test_default_steel_elastic_constants():
-    m = Material(fy=1.0, fu=1.0)
-    assert (m.E, m.nu, round(m.G)) == (210000.0, 0.3, 80769)
