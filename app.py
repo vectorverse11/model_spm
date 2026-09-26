@@ -19,7 +19,7 @@ from physics_engine import (
 st.set_page_config(page_title="Virtual SPM — Hook Connector Tester",
                    page_icon="🏗️", layout="wide")
 st.title("🏗️ Virtual SPM — Beam-End Hook Connector Stiffness Test")
-st.caption("Cantilever test · D1 actuator @ a · D2/D3 LVDTs near connector · "
+st.caption("Cantilever test · D1 piston @ 400 mm · D2 LVDT @ 40 mm · D3 LVDT @ 140 mm · "
            "component method C1–C6")
 
 LIP_HEIGHTS = {3: 145.0, 4: 195.0, 5: 245.0}
@@ -86,9 +86,9 @@ with st.sidebar:
     g_M0 = st.number_input("γ_M0 on component resistances", 1.0, 1.5, 1.0, 0.05)
 
     st.subheader("6. Test Rig & Sensors")
-    a = st.number_input("Load arm a (mm) — D1 position", 100.0, 1000.0, 400.0, 10.0)
-    x2 = st.number_input("D2 LVDT position (mm)", 10.0, 1000.0, 140.0, 5.0)
-    x3 = st.number_input("D3 LVDT position (mm)", 0.0, 1000.0, 40.0, 5.0)
+    a = st.number_input("Load arm a (mm) — D1 piston sensor", 100.0, 1000.0, 400.0, 10.0)
+    x2 = st.number_input("D2 LVDT from upright face (mm)", 0.0, 1000.0, 40.0, 5.0)
+    x3 = st.number_input("D3 LVDT from upright face (mm)", 10.0, 1000.0, 140.0, 5.0)
     k_train = st.number_input("Actuator + load-cell stiffness (N/mm)",
                               1e3, 1e8, 2e5, 1e4, format="%.0e")
     noise = st.number_input("LVDT noise σ (mm)", 0.0, 0.1, 0.0, 0.001, format="%.3f")
@@ -111,8 +111,8 @@ with st.sidebar:
     eta = st.number_input("η (design moment factor)", 0.5, 1.0, 1.0, 0.05)
     braced = st.checkbox("Braced frame (k_b = 8, else 25)", False)
 
-if x2 <= x3:
-    st.error("D2 must be further from the upright than D3.")
+if x3 <= x2:
+    st.error("D3 must be further from the upright than D2.")
     st.stop()
 
 # ============================================================
@@ -165,7 +165,7 @@ st.divider()
 P = np.array(rec["P"])
 fig, ax = plt.subplots(1, 3, figsize=(17, 5))
 
-ax[0].plot(rec["D1"], P, "g-", lw=2, label=f"D1 actuator (x={a:.0f})")
+ax[0].plot(rec["D1"], P, "g-", lw=2, label=f"D1 piston (x={a:.0f})")
 ax[0].plot(rec["D2"], P, "b-", lw=2, label=f"D2 LVDT (x={x2:.0f})")
 ax[0].plot(rec["D3"], P, "r--", lw=1.5, label=f"D3 LVDT (x={x3:.0f})")
 ax[0].set(xlabel="Displacement (mm)", ylabel="Load P (N)",
@@ -175,7 +175,7 @@ ax[0].legend(loc="lower right", fontsize=8)
 
 th = np.array(rec["theta_corr"])
 Mk = np.array(rec["M"]) / 1e6
-ax[1].plot(th, Mk, "r-", lw=2.2, label="Test (D2−D3)/Δx")
+ax[1].plot(th, Mk, "r-", lw=2.2, label="Test (D3−D2)/Δx")
 th_line = np.linspace(0, th.max(), 50)
 ax[1].plot(th_line, res["S_j_ini_Nmm_rad"] * th_line / 1e6, "k:", lw=1.2,
            label="S_j,ini (component)")
@@ -242,7 +242,7 @@ st.subheader("📡 Sensor Data (D1, D2, D3)")
 sensor_df = pd.DataFrame({
     "Step": rec["step"],
     "Load (N)": rec["P"],
-    "D1_actuator_mm": rec["D1"],
+    "D1_piston_mm": rec["D1"],
     "D2_LVDT_mm": rec["D2"],
     "D3_LVDT_mm": rec["D3"],
     "Moment (N·mm)": rec["M"],

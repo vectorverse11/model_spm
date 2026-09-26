@@ -43,4 +43,5 @@ def test_sensors_monotonic_and_ordered():
     rec = make().run()["record"]
     D1, D2, D3 = map(np.array, (rec["D1"], rec["D2"], rec["D3"]))
     assert np.all(np.diff(D1) >= 0)
-    assert np.all(D1 >= D2) and np.all(D2 >= D3)
+    # D1 piston @ 400 > D3 @ 140 > D2 @ 40 mm from the upright face
+    assert np.all(D1 >= D3) and np.all(D3 >= D2)

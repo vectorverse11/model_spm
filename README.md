@@ -14,13 +14,13 @@ python -m pytest -q tests     # engine checks
 
 ## Test rig replicated
 ```
-      D1 (actuator, x = a = 400)      D2 (x = 140)   D3 (x = 40)
+      D1 (piston, x = a = 400)        D3 (x = 140)   D2 (x = 40)
              ↓ P                            ↓            ↓
   ┌──────────┴──────────────────────────────┴────────────┴──┐╟ upright (clamped, 800 mm)
   └─────────────────────── beam stub (500) ──────────────────┘╟ ← hook connector (3/4/5 lips)
 ```
 * Moment at the connector: `M = P · a`
-* Measured rotation: `θ = (D2 − D3) / (x2 − x3)`. A corrected value also removes the
+* Measured rotation: `θ = (D3 − D2) / (x3 − x2)`. A corrected value also removes the
   beam's own elastic curvature between the two LVDTs.
 
 ## Hook connector geometry (fixed product data)

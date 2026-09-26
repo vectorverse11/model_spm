@@ -11,10 +11,10 @@ storage racking (EN 15512 Annex A "beam end connector test"):
     * a hydraulic actuator pushes the beam down at lever arm ``a`` (400 mm)
       from the upright face in small monotonic load steps,
     * three displacement sensors are recorded:
-          D1 = actuator / load-point displacement      (x = a      = 400 mm)
-          D2 = LVDT on the beam, far                    (x = x2     = 140 mm)
-          D3 = LVDT on the beam, near the connector     (x = x3     =  40 mm)
-      and the connector rotation is  theta = (D2 - D3) / (x2 - x3).
+          D1 = piston (actuator) displacement sensor    (x = a  = 400 mm)
+          D2 = LVDT on the beam, near the connector     (x = x2 =  40 mm)
+          D3 = LVDT on the beam, further out            (x = x3 = 140 mm)
+      and the connector rotation is  theta = (D3 - D2) / (x3 - x2).
 
 The connection is decomposed into components following the EN 1993-1-8
 component method (the same philosophy as bolted end-plate joints) but with
@@ -182,8 +182,8 @@ class ComponentParameters:
 @dataclass
 class TestRig:
     load_arm_a: float = 400.0     # actuator distance from upright face
-    x_D2: float = 140.0           # far LVDT
-    x_D3: float = 40.0            # near LVDT
+    x_D2: float = 40.0            # LVDT near the connector
+    x_D3: float = 140.0           # LVDT further out
     load_train_stiffness: float = 2.0e5   # N/mm, actuator + load-cell (affects D1 only)
     sensor_noise_mm: float = 0.0  # 1-sigma LVDT noise
     seed: int = 1
@@ -426,9 +426,9 @@ class HookConnectorSPM:
                 D2 += rng.normal(0, noise)
                 D3 += rng.normal(0, noise)
 
-            th_meas = (D2 - D3) / (x2 - x3)
-            th_corr = th_meas - (self.beam_deflection(P, x2)
-                                 - self.beam_deflection(P, x3)) / (x2 - x3)
+            th_meas = (D3 - D2) / (x3 - x2)
+            th_corr = th_meas - (self.beam_deflection(P, x3)
+                                 - self.beam_deflection(P, x2)) / (x3 - x2)
 
             for k, v in zip(rec.keys(), (
                     i, P, M, D1, D2, D3, th_meas, th_corr,
