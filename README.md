@@ -69,6 +69,8 @@ distance. The engaged lip height is inferred as 2·(25.1 − 10.3) = 29.6 mm.
    * Equal-area stiffness `k_ti` up to `M_Rd`
    * Secant stiffness from 10 % to 40 % of `M_max`
    * Joint classification per EN 1993-1-8 §5.2.2.5: semi-rigid when `0.5 E I_b / L_b < S_j,ini < k_b E I_b / L_b`
+   * Idealised stiffness for global analysis `S_j = S_j,ini / η` (EN 1993-1-8 §5.1.2, η = 2 for end plates)
+   * Strength classification (§5.2.3): pinned if `M_j,Rd ≤ 0.25 M_pl,beam`, full-strength if `M_j,Rd ≥ M_pl,beam`, otherwise partial-strength
 
 ## Calibration note
 The component parameters (l_h, L_h, b_brg, L_brg, b_u, L_u, b_l, L_l) are

@@ -110,6 +110,8 @@ with st.sidebar:
     gamma_M = st.number_input("γ_M (connections)", 1.0, 1.5, 1.1, 0.05)
     eta = st.number_input("η (design moment factor)", 0.5, 1.0, 1.0, 0.05)
     braced = st.checkbox("Braced frame (k_b = 8, else 25)", False)
+    eta_S = st.number_input("Stiffness modification η for S_j = S_j,ini/η",
+                            1.0, 3.5, 2.0, 0.1)
 
 if x3 <= x2:
     st.error("D3 must be further from the upright than D2.")
@@ -132,7 +134,7 @@ sim = HookConnectorSPM(
     TestRig(a, x2, x3, k_train, noise),
     LoadSchedule(inc, P_max, stop_fail),
     NonlinearOptions(loose, loose_M, psi, hard, rot_cap),
-    Evaluation(gamma_M, eta, braced),
+    Evaluation(gamma_M, eta, braced, eta_S),
 )
 res = sim.run()
 rec = res["record"]
@@ -216,7 +218,9 @@ summary = pd.DataFrame({
         "z_eq", "k_eq", "S_j,ini = Σ k_eff z²", "M_j,Rd = Σ F_Rd z",
         "k_ti (equal area)", "Secant 10–40 % M_max", "M_max (test)", "M_Rd",
         "Rotation capacity φ = t_p/h_e", "Pinned limit 0.5 EI_b/L_b",
-        "Rigid limit k_b EI_b/L_b", "Classification", "Failure mode",
+        "Rigid limit k_b EI_b/L_b", "Classification (stiffness)",
+        "Idealised S_j = S_j,ini/η", "Beam M_pl", "Classification (strength)",
+        "Failure mode",
     ],
     "Value": [
         f"{res['K1_N_mm']:.1f} N/mm", f"{res['F1_Rd_N']:.0f} N",
@@ -229,7 +233,10 @@ summary = pd.DataFrame({
         f"{res['M_max_Nmm'] / 1e6:.3f} kN·m", f"{res['M_Rd_Nmm'] / 1e6:.3f} kN·m",
         f"{res['theta_avail_rad']:.4f} rad",
         f"{lo / 1e6:.2f} kN·m/rad", f"{hi / 1e6:.2f} kN·m/rad",
-        res["classification"], res["failure_mode"],
+        res["classification"],
+        f"{res['S_j_ideal_Nmm_rad'] / 1e6:.2f} kN·m/rad",
+        f"{res['M_pl_beam_Nmm'] / 1e6:.3f} kN·m",
+        res["strength_classification"], res["failure_mode"],
     ],
 })
 st.dataframe(summary, width="stretch", hide_index=True)

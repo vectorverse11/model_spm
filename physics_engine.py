@@ -210,6 +210,7 @@ class Evaluation:
     gamma_M: float = 1.1          # EN 15512 partial factor for connections
     eta: float = 1.0              # design-moment reduction (<= 1)
     frame_braced: bool = False    # k_b = 8 braced, 25 unbraced (EN 1993-1-8 5.2.2.5)
+    stiffness_modification: float = 2.0  # eta: S_j = S_j,ini / eta (EN 1993-1-8 5.1.2)
 
 
 # ============================================================
@@ -486,6 +487,15 @@ class HookConnectorSPM:
         else:
             cls = "Semi-rigid"
 
+        # Strength classification (EN 1993-1-8 5.2.3) against the beam
+        ratio = self.M_j_Rd / self.M_pl_beam
+        if ratio <= 0.25:
+            cls_strength = "Nominally pinned"
+        elif ratio >= 1.0:
+            cls_strength = "Full-strength"
+        else:
+            cls_strength = "Partial-strength"
+
         rows_table = []
         for r in self.rows:
             d = {"Lip": r.index, "y from top (mm)": r.y_from_top,
@@ -523,6 +533,8 @@ class HookConnectorSPM:
             "lip_height_mm": self.con.lip_height,
             "theta_avail_rad": self.theta_avail,
             "classification": cls,
+            "strength_classification": cls_strength,
+            "S_j_ideal_Nmm_rad": self.S_j_ini / self.ev.stiffness_modification,
             "class_limits_Nmm_rad": (0.5 * EIb_Lb, kb * EIb_Lb),
             "total_steps": len(P),
         }
