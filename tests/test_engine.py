@@ -12,12 +12,12 @@ MAT = Material(fy=350.0, fu=450.0)
 UPRIGHT = UprightSection(face_width=90.0, depth=70.0, lip=20.0, thickness=2.0)
 
 
-def make(n_lips=5, d_max=20.0, beam_depth=135.0, cc="beam_bottom", P0=0.0, **nl):
+def make(n_lips=5, d_max=20.0, **nl):
     return HookConnectorSPM(
-        MAT, BeamSection("box", beam_depth, 50.0, 1.6), UPRIGHT,
+        MAT, BeamSection("box", 80.0, 50.0, 1.6), UPRIGHT,
         HookConnector(n_lips=n_lips), ComponentParameters(),
-        TestRig(max_deflection_mm=d_max, compression_centre=cc),
-        LoadSchedule(initial_load_kN=P0), NonlinearOptions(**nl), Evaluation())
+        TestRig(max_deflection_mm=d_max), LoadSchedule(),
+        NonlinearOptions(**nl), Evaluation())
 
 
 def test_default_steel_elastic_constants():
@@ -33,12 +33,11 @@ def test_connector_geometry():
     assert np.isclose(HookConnector().lip_height, 29.6)
 
 
-def test_compression_centre_and_tension_rows():
-    # 5 lips, beam 135 deep, 55 above -> beam bottom 190 mm (flange mid 189.2)
+def test_lever_arms_to_connector_bottom():
     sim = make()
-    assert np.isclose(sim.compression_centre_from_top, 55 + 135 - 0.8)
-    assert [r.in_tension for r in sim.rows] == [True, True, True, True, False]
-    assert np.isclose(make(cc="connector_bottom").compression_centre_from_top, 245.0)
+    assert np.isclose(sim.compression_centre_from_top, 245.0)
+    assert np.allclose([r.z for r in sim.rows], [219.9, 169.9, 119.9, 69.9, 19.9])
+    assert all(r.in_tension for r in sim.rows)
 
 
 def test_equal_area_recovers_linear_slope():
@@ -47,8 +46,7 @@ def test_equal_area_recovers_linear_slope():
 
 
 def test_more_lips_stiffer_and_stronger():
-    r3 = make(3, beam_depth=35.0).run()
-    r5 = make(5, beam_depth=135.0).run()
+    r3, r5 = make(3).run(), make(5).run()
     assert r5["S_j_ini_Nmm_rad"] > r3["S_j_ini_Nmm_rad"]
     assert r5["M_j_Rd_Nmm"] > r3["M_j_Rd_Nmm"]
 
@@ -69,10 +67,16 @@ def test_stops_exactly_at_max_deflection(d_max):
     assert res["peak_reached"] == (d_max == 200.0)
 
 
-def test_dials_zeroed_at_initial_load():
-    rec = make(P0=0.504).run()["record"]
-    assert rec["P"][0] == pytest.approx(504.0)
+def test_starts_at_zero_load_in_increments():
+    rec = make().run()["record"]
+    assert rec["P"][0] == 0.0
     assert rec["D1"][0] == rec["D2"][0] == rec["D3"][0] == 0.0
+    assert np.allclose(np.diff(rec["P"][:10]), 10.0)   # 0.01 kN steps
+
+
+def test_component_table_has_c1_to_c6():
+    tab = make().run()["component_table"]
+    assert [c["Component"][:2] for c in tab] == ["C1", "C2", "C3", "C4", "C5", "C6"]
 
 
 def test_sensors_monotonic_and_ordered():

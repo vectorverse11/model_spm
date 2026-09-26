@@ -11,7 +11,7 @@ storage racking (EN 15512 Annex A "beam end connector test"):
     * a hydraulic piston pushes the beam DOWN at a = 400 mm from the upright
       face in small load steps (0.01 / 0.02 kN) until the maximum deflection
       is reached,
-    * three dial / displacement sensors are recorded (zeroed at test start):
+    * three dial / displacement sensors are recorded from 0 kN:
           Dial 1 (D1) = piston displacement               (x = a  = 400 mm)
           Dial 2 (D2) = beam deflection near connector    (x = x2 =  40 mm)
           Dial 3 (D3) = beam deflection further out       (x = x3 = 140 mm)
@@ -31,9 +31,9 @@ by hook ("lip") rows:
 For every lip row r in tension the springs C2..C6 act in series:
     k_eff,r = 1 / (1/K2 + 1/K3 + 1/K4 + 1/K5 + 1/K6)
     F_Rd,r  = min(F2,Rd ... F6,Rd)
-Rows are assembled about the centre of compression with lever arms z_r
-(rows at or below the centre of compression are in compression and carry
-no tension):
+Rows are assembled about the centre of compression, taken at the bottom
+edge of the connector (downward load: the top lips pull out, the connector
+bottom bears on the upright), with lever arms z_r = h_c - y_r:
     S_j,ini = sum(k_eff,r * z_r^2)          (EN 1993-1-8 6.3 with k in N/mm)
     M_j,Rd  = sum(F_Rd,r * z_r)             (plastic row distribution)
 Row non-linearity uses the EN 1993-1-8 6.3.1(6) stiffness ratio
@@ -98,10 +98,6 @@ class BeamSection:
             raise ValueError(f"Unknown beam section type: {self.section_type}")
         return {"I": I, "Wpl": Wpl}
 
-    @property
-    def flange_thickness(self) -> float:
-        return self.thickness if self.section_type == "box" else 0.0
-
 
 @dataclass
 class UprightSection:
@@ -113,7 +109,9 @@ class UprightSection:
     perforation_factor: float = 1.0    # I_net / I_gross (1.0 = gross section)
     I_custom: Optional[float] = None   # overrides computed I if given
     clamp_length: float = 800.0  # full upright length in the rig (mm)
-    end_fixity: str = "fixed-fixed"    # "fixed-fixed" | "pinned-pinned" | "rigid"
+    # Global upright bending is not part of the handwritten C1-C6 method:
+    # "rigid" (default) ignores it; "fixed-fixed" / "pinned-pinned" add it.
+    end_fixity: str = "rigid"
 
     def I_bending(self) -> float:
         """Second moment about the axis parallel to the slotted face
@@ -141,8 +139,6 @@ class HookConnector:
         width 44 mm, hole top-edge 10.3 mm from top, 34.7 mm bottom end
         distance, pitch 50 mm, first lip centre 25.1 mm from top,
         plate thickness t_p = 4 mm.
-    The beam is welded with the connector projecting ``extension_above``
-    (55 mm) above the beam top.
     """
     n_lips: int = 5
     width: float = 44.0
@@ -151,8 +147,6 @@ class HookConnector:
     top_end_distance: float = 10.3
     bottom_end_distance: float = 34.7
     first_lip_centre: float = 25.1
-    extension_above: float = 55.0   # connector top -> beam top (mm)
-    extension_below: float = 55.0   # beam bottom -> connector bottom (mm)
 
     @property
     def height(self) -> float:
@@ -196,13 +190,13 @@ class ComponentParameters:
 
 @dataclass
 class TestRig:
+    __test__ = False   # not a pytest test class
     max_deflection_mm: float                 # test stops when reached (required)
     stop_sensor: str = "D1"                  # sensor checked against the limit
     load_arm_a: float = 400.0                # piston distance from upright face
     x_D2: float = 40.0
     x_D3: float = 140.0
-    compression_centre: str = "beam_bottom"  # "beam_bottom" | "connector_bottom"
-    load_train_stiffness: float = 2.0e5      # N/mm, affects D1 only
+    load_train_stiffness: float = float("inf")  # N/mm, piston compliance (D1 only); off
     sensor_noise_mm: float = 0.0
     seed: int = 1
 
@@ -210,14 +204,13 @@ class TestRig:
 @dataclass
 class LoadSchedule:
     increment_kN: float = 0.01    # 0.01 or 0.02 kN per step
-    initial_load_kN: float = 0.0  # dials are zeroed at this load
     time_per_step_s: float = 0.02
     dial_resolution_mm: float = 0.01
 
 
 @dataclass
 class NonlinearOptions:
-    looseness_rad: float = 0.004  # initial looseness rotation (EN 15512 A.2.5)
+    looseness_rad: float = 0.0    # extra, not in C1-C6 method (EN 15512 A.2.5)
     looseness_moment: float = 5.0e4   # N*mm; looseness mostly closed by ~2x this
     psi: float = 2.7              # EN 1993-1-8 Table 6.8 shape factor
     hardening_ratio: float = 0.02  # post-F_Rd tangent / k_eff
@@ -343,13 +336,9 @@ class HookConnectorSPM:
 
     @property
     def compression_centre_from_top(self) -> float:
-        """Downward load: top lips pull out, the connector bears on the
-        upright below. EN 1993-1-8 places the centre of compression at the
-        mid-thickness of the beam's compression (bottom) flange."""
-        if self.rig.compression_centre == "connector_bottom":
-            return self.con.height
-        return (self.con.extension_above + self.beam.depth
-                - self.beam.flange_thickness / 2.0)
+        """Downward load: top lips pull out and the connector bottom edge
+        bears on the upright, so rotation is about the connector bottom."""
+        return self.con.height
 
     def _build_rows(self) -> None:
         y_c = self.compression_centre_from_top
@@ -446,14 +435,12 @@ class HookConnectorSPM:
 
     def run(self) -> Dict:
         inc = max(self.load.increment_kN * 1000.0, 1e-6)
-        P0 = self.load.initial_load_kN * 1000.0
         d_max = self.rig.max_deflection_mm
         key = self.rig.stop_sensor
         x_stop = {"D1": self.a, "D2": self.rig.x_D2, "D3": self.rig.x_D3}[key]
-        tare = self._state(P0)
 
         def reading(s):
-            return s[key] - tare[key]
+            return s[key]
 
         states: List[Dict[str, float]] = []
         stop_reason = None
@@ -465,13 +452,13 @@ class HookConnectorSPM:
                 lo, hi = (mid, hi) if reading(self._state(mid)) < d_max else (lo, mid)
             return self._state(hi)
 
-        # ---- Phase 1: load-controlled increments up to the peak ----
-        P = P0
+        # ---- Phase 1: load-controlled increments from 0 kN up to the peak ----
+        P = 0.0
         while True:
             P_step = min(P, self.P_cap)
             s = self._state(P_step)
             if reading(s) >= d_max:
-                lo = states[-1]["P"] if states else P0
+                lo = states[-1]["P"] if states else 0.0
                 states.append(stop_between(lo, P_step) if P_step > lo else s)
                 stop_reason = f"Maximum deflection {d_max:g} mm reached on {key}"
                 break
@@ -500,7 +487,7 @@ class HookConnectorSPM:
             stop_reason = (f"{self.cap_mode}; load held at peak until maximum "
                            f"deflection {d_max:g} mm reached on {key}")
 
-        return self._summarize(states, tare, stop_reason)
+        return self._summarize(states, stop_reason)
 
     # --------------------------------------------------------
     @staticmethod
@@ -521,24 +508,21 @@ class HookConnectorSPM:
         denom = 2.0 * (M_Rd * th[-1] - area_curve)
         return M_Rd**2 / denom if denom > 0 else float("nan")
 
-    def _summarize(self, states: List[Dict[str, float]], tare: Dict[str, float],
-                   stop_reason: str) -> Dict:
+    def _summarize(self, states: List[Dict[str, float]], stop_reason: str) -> Dict:
         rng = np.random.default_rng(self.rig.seed)
         noise = self.rig.sensor_noise_mm
         x2, x3 = self.rig.x_D2, self.rig.x_D3
-        P0 = tare["P"]
 
         rec = {k: [] for k in ("step", "time_s", "P", "M", "D1", "D2", "D3",
                                "theta_meas", "theta_corr", "theta_conn")}
         row_forces = {r.index: [] for r in self.rows}
         for i, s in enumerate(states):
-            D = {k: s[k] - tare[k] for k in ("D1", "D2", "D3")}
+            D = {k: s[k] for k in ("D1", "D2", "D3")}
             if noise > 0 and i > 0:
                 D = {k: v + rng.normal(0, noise) for k, v in D.items()}
             th_meas = (D["D3"] - D["D2"]) / (x3 - x2)
-            dP = s["P"] - P0
-            th_corr = th_meas - (self.beam_deflection(dP, x3)
-                                 - self.beam_deflection(dP, x2)) / (x3 - x2)
+            th_corr = th_meas - (self.beam_deflection(s["P"], x3)
+                                 - self.beam_deflection(s["P"], x2)) / (x3 - x2)
             for k, v in (("step", i), ("time_s", i * self.load.time_per_step_s),
                          ("P", s["P"]), ("M", s["M"]), ("D1", D["D1"]),
                          ("D2", D["D2"]), ("D3", D["D3"]),
@@ -551,8 +535,6 @@ class HookConnectorSPM:
 
         M = np.array(rec["M"])
         th = np.array(rec["theta_corr"])
-        if P0 > 0:   # evaluation curve from the origin
-            M, th = np.insert(M, 0, 0.0), np.insert(th, 0, 0.0)
 
         M_max = float(M.max())
         M_Rd = self.ev.eta * M_max / self.ev.gamma_M
@@ -597,11 +579,37 @@ class HookConnectorSPM:
             d["Governing"] = r.governing
             rows_table.append(d)
 
+        # ---- Component table (Stiffness | Resistance | Deformation), as in the
+        # hand-written table. C2..C6 are reported for the most loaded (top) lip:
+        # all springs in a row carry the same force F, elastic deformation of
+        # each is F / K_i and any plastic part is assigned to the governing one.
+        P_pk = float(max(rec["P"]))
+        top = max(self.t_rows, key=lambda r: r.z)
+        F_top = row_forces[top.index][-1]
+        d_row = top.z * rec["theta_conn"][-1]
+        d_el = {c.code: F_top / c.k for c in top.components}
+        d_pl = max(0.0, d_row - sum(d_el.values()))
+        gov_code = top.governing.split()[0]
+        component_table = [{
+            "Component": "C1 Beam flexure", "Stiffness K (N/mm)": self.K1,
+            "Resistance F_Rd (N)": self.F1_Rd, "Force at peak (N)": P_pk,
+            "Deformation δ at peak (mm)": P_pk / self.K1,
+            "Yielded?": P_pk > self.F1_Rd}]
+        for c in top.components:
+            component_table.append({
+                "Component": f"{c.code} {c.name} (lip {top.index})",
+                "Stiffness K (N/mm)": c.k, "Resistance F_Rd (N)": c.F_Rd,
+                "Force at peak (N)": F_top,
+                "Deformation δ at peak (mm)": d_el[c.code]
+                + (d_pl if c.code == gov_code else 0.0),
+                "Yielded?": F_top > c.F_Rd})
+
         theta_max = float(np.max(rec["theta_corr"]))
         return {
             "record": rec,
             "row_forces": row_forces,
             "rows_table": rows_table,
+            "component_table": component_table,
             "stop_reason": stop_reason,
             "peak_reached": self.peak_reached,
             "P_cap_N": self.P_cap,
