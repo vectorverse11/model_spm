@@ -1,0 +1,16 @@
+Quantity,Value
+Client,Demo Client
+Upright,Upright 90 x 1.4mm
+Beam,RFB 80 - 1.2mm
+Connector,3 Lip Connector
+Steel,"IS 2062 E 250 A (fy 250, fu 410)"
+"Rotational stiffness elastic S_j,ini (kN·m/rad)",68.411
+Rotational stiffness plastic S_j (kN·m/rad),34.205
+"Moment resistance elastic M_j,el (kN·m)",0.0751
+"Moment resistance plastic M_j,Rd (kN·m)",0.1126
+C1 Beam local deformation K (N/mm),2756.2
+C2 Hook bending K (N/mm),194414.1
+C3 Hook shear K (N/mm),1195384.6
+C4 Hook-upright bearing K (N/mm),400000.0
+C5 Upright local deformation K (N/mm),1708.0
+C6 Upright lip deformation K (N/mm),17220.0

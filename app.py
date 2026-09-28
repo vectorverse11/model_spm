@@ -1,425 +1,353 @@
 """
-Streamlit GUI — Virtual SPM for Beam-End Hook Connector Stiffness Testing
-========================================================================
-Cantilever beam-end-connector test evaluated with the EN 1993-1-8 component
-method (as in COP) adapted to hook ("lip") rows, components C1–C6.
-Load starts at 0 kN and increases by 0.01 or 0.02 kN per step until the
-maximum deflection is reached.
+Virtual SPM — Beam Stiffness Tester (Streamlit prototype)
+=========================================================
+COP-style component analysis of the assembly  UPRIGHT + BEAM + HOOK CONNECTOR.
+Run with:  streamlit run app.py
 """
+
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
 
+import catalog
 from physics_engine import (
-    BeamSection, ComponentParameters, Evaluation, HookConnector,
-    HookConnectorSPM, LoadSchedule, Material, NonlinearOptions, TestRig,
-    UprightSection,
+    BEAM_LENGTH, E, G, LOAD_ARM, NU, X_D2, X_D3,
+    Beam, ComponentInputs, Connector, Material, TestSetup, Upright, VirtualSPM,
 )
 
-st.set_page_config(
-    page_title="Virtual SPM — Beam Stiffness Tester",
-    page_icon="🏗️",
-    layout="wide",
-)
+st.set_page_config(page_title="Virtual SPM — Beam Stiffness Tester",
+                   page_icon="🏗️", layout="wide")
+
+st.markdown("""
+<style>
+.dim-box {background:#EAF0F2;border:1px solid #D5DEE2;border-radius:6px;
+          padding:10px 16px;display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
+.dim-box .lbl {font-family:monospace;font-size:0.75rem;color:#667}
+.dim-box .val {font-family:monospace;font-weight:700;font-size:1.05rem;color:#2E5566}
+</style>""", unsafe_allow_html=True)
 
 st.title("🏗️ Virtual SPM — Component-Method Beam Stiffness Tester")
-st.caption("Upright + beam + hook connector — 3-sensor layout "
-           "(D1 piston @ 400 mm, D2 @ 40 mm, D3 @ 140 mm)")
+st.caption("Upright + Beam + Hook Connector · component analysis (COP style) · "
+           f"virtual cantilever test: beam {BEAM_LENGTH:g} mm, D1 piston @ "
+           f"{LOAD_ARM:g} mm, D2 @ {X_D2:g} mm, D3 @ {X_D3:g} mm")
 
-LIP_HEIGHTS = {3: 145.0, 4: 195.0, 5: 245.0}
 missing = []
 
 
-def required(label, lo, hi, step, container=st, fmt=None):
-    kw = {"format": fmt} if fmt else {}
-    v = container.number_input(f"{label} *", lo, hi, value=None, step=step,
-                               placeholder="required", **kw)
-    if v is None:
+def num(label, key, value=None, fmt="%.2f", min_value=0.0, container=st, help=None):
+    """Required number input; empty (None) until the user enters a value."""
+    v = container.number_input(label, min_value=min_value, value=value, key=key,
+                               format=fmt, placeholder="0.0", help=help)
+    if v is None or v <= 0:
         missing.append(label)
+        return None
     return v
 
 
-# ============================================================
-# SIDEBAR
-# ============================================================
+def dim_box(values: dict):
+    cells = "".join(f"<div><div class='lbl'>{k}</div><div class='val'>{v:g}</div></div>"
+                    if isinstance(v, (int, float)) else
+                    f"<div><div class='lbl'>{k}</div><div class='val'>{v}</div></div>"
+                    for k, v in values.items())
+    st.markdown(f"<div class='dim-box'>{cells}</div>", unsafe_allow_html=True)
 
-with st.sidebar:
-    st.header("⚙️ Input Parameters")
-    st.caption("Fields marked * are required.")
 
-    # ---------- 1. Material ----------
-    st.subheader("1. Material (Steel)")
-    material_name = st.text_input("Material name", "Steel")
-    col1, col2 = st.columns(2)
-    with col1:
-        E = st.number_input("E (N/mm²)", 50000.0, 300000.0, 210000.0, 1000.0)
-        fy = required("fy (N/mm²)", 100.0, 1000.0, 5.0)
-    with col2:
-        nu = st.number_input("ν", 0.1, 0.5, 0.3, 0.01)
-        fu = required("fu (N/mm²)", 100.0, 1200.0, 5.0)
-    st.caption(f"G = E / 2(1+ν) = **{E / (2 * (1 + nu)):.0f} N/mm²**")
-
-    # ---------- 2. Beam ----------
-    st.subheader("2. Beam Geometry (C1)")
-    beam_L = st.number_input("Beam length (mm)", 100.0, 2000.0, 500.0, 10.0)
-    beam_section = st.selectbox("Section type", ["box", "solid_rect", "custom"])
-    beam_h = required("Beam depth h_b (mm)", 5.0, 500.0, 1.0)
-    beam_b = beam_t = I_cust = W_cust = None
-    if beam_section in ("box", "solid_rect"):
-        beam_b = required("Beam width b (mm)", 5.0, 500.0, 1.0)
-    if beam_section == "box":
-        beam_t = required("Beam wall thickness (mm)", 0.5, 20.0, 0.1)
-    if beam_section == "custom":
-        I_cust = required("Beam I_b (mm⁴)", 1e3, 1e9, 1e4, fmt="%.3e")
-        W_cust = required("Beam W_pl (mm³)", 1e2, 1e8, 1e3, fmt="%.3e")
-    beam_Lb = st.number_input("Rack beam span L_b for classification (mm)",
-                              500.0, 10000.0, value=None, step=50.0,
-                              placeholder="optional")
-
-    # ---------- 3. Upright ----------
-    st.subheader("3. Upright (Column)")
-    up_H = st.number_input("Upright length (mm)", 100.0, 3000.0, 800.0, 10.0)
-    up_B = required("Slotted face width (mm)", 10.0, 300.0, 1.0)
-    up_D = required("Side-wall depth (mm)", 10.0, 300.0, 1.0)
-    up_c = required("Return lip (mm)", 0.0, 100.0, 1.0)
-    up_t = required("Upright thickness t_u (mm)", 0.5, 10.0, 0.1)
-    up_I = st.number_input("I_u override (mm⁴)", 1e3, 1e9, value=None, step=1e4,
-                           format="%.3e", placeholder="computed from section")
-    up_perf = st.slider("Perforation factor I_net/I_gross", 0.5, 1.0, 1.0, 0.01)
-
-    # ---------- 4. Hook connector ----------
-    st.subheader("4. Hook Connector")
-    n_lips = st.selectbox("Number of lips", [5, 4, 3], index=0)
-    st.caption(f"Height h_c = **{LIP_HEIGHTS[n_lips]:.0f} mm** · width 44 mm · "
-               "pitch 50 mm · top 10.3 / bottom 34.7 mm · "
-               "1st lip centre 25.1 mm")
-    t_p = st.number_input("Connector thickness t_p (mm)", 1.0, 10.0, 4.0, 0.5)
-
-    # ---------- 5. Component parameters ----------
-    st.subheader("5. Component Parameters (per lip)")
-    st.caption("Effective lengths / widths from the component formulae — "
-               "estimates, to be calibrated against a physical test.")
-    with st.expander("C2 Hook bending · K2 = 3EI_h / l_h³"):
-        l_h = st.number_input("Effective hook bending length l_h (mm)",
-                              1.0, 50.0, 8.0, 0.5)
-        b_h = st.number_input("Hook width b_h (mm) — 0 = lip height 29.6",
-                              0.0, 60.0, 0.0, 0.5)
-    with st.expander("C3 Hook shear · K3 = G·A_h / L_h"):
-        L_h = st.number_input("Effective hook deformation length L_h (mm)",
-                              1.0, 50.0, 8.0, 0.5)
-    with st.expander("C4 Hook–upright bearing · K4 = E·b·t_u / L"):
-        b_brg = st.number_input("Bearing width b_bearing (mm)", 1.0, 60.0, 12.0, 0.5)
-        L_brg = st.number_input("Bearing length L_bearing (mm)", 1.0, 60.0, 10.0, 0.5)
-    with st.expander("C5 Upright local · K5 = E·b_u·t_u³ / 4L_u³"):
-        b_u = st.number_input("Effective upright width b_u (mm)", 5.0, 150.0, 40.0, 1.0)
-        L_u = st.number_input("Effective upright length L_u (mm)", 2.0, 100.0, 15.0, 0.5)
-    with st.expander("C6 Lip deformation · K6 = E·b_l·t_l³ / 4L_l³"):
-        b_l = st.number_input("Effective lip width b_l (mm) — 0 = pitch 50",
-                              0.0, 100.0, 0.0, 1.0)
-        L_l = st.number_input("Effective lip length L_l (mm)", 2.0, 100.0, 20.0, 0.5)
-
-    # ---------- 6. Load schedule ----------
-    st.subheader("6. Load Schedule")
-    st.markdown("**Load increment per step** (starts at 0 kN)")
-    load_increment = st.selectbox(
-        "Increment (kN)", options=[0.01, 0.02], index=0,
-        help="Gradual increment in applied load per step.")
-    max_defl = required("Max deflection — test stops (mm)", 0.1, 500.0, 1.0)
-    stop_sensor = st.selectbox(
-        "Max deflection measured on", ["D1", "D2", "D3"],
-        format_func=lambda k: {"D1": "D1 piston", "D2": "D2", "D3": "D3"}[k])
-    dt = st.number_input("Time per step (s)", 0.001, 10.0, 0.02, 0.001, format="%.3f")
-
-    # ---------- 7. Sensors ----------
-    st.subheader("7. Sensor Layout")
-    a = st.number_input("D1 piston position from upright face (mm)",
-                        50.0, 2000.0, 400.0, 10.0)
-    x2 = st.number_input("D2 position from upright face (mm)", 0.0, 2000.0, 40.0, 5.0)
-    x3 = st.number_input("D3 position from upright face (mm)", 1.0, 2000.0, 140.0, 5.0)
-    dial_res = st.number_input("Sensor resolution (mm)", 0.001, 0.1, 0.01, 0.001,
-                               format="%.3f")
-    noise = st.number_input("Sensor noise σ (mm)", 0.0, 0.1, 0.0, 0.001, format="%.3f")
-
-    # ---------- 8. Non-linear behaviour ----------
-    st.subheader("8. Non-Linear Behaviour")
-    psi = st.slider("ψ — M-θ curve shape (EN 1993-1-8)", 1.0, 4.0, 2.7, 0.1)
-    hard = st.slider("Post-yield hardening ratio", 0.001, 0.20, 0.02, 0.001)
-
-    st.markdown("**Additional effects** (not part of the handwritten C1–C6 method)")
-    extras = st.checkbox("Include additional effects", False)
-    loose, loose_M, up_fixity, k_train = 0.0, 5e4, "rigid", 1e15
-    if extras:
-        loose = st.number_input("Connector looseness θ₀ (rad)", 0.0, 0.05, 0.004,
-                                0.001, format="%.3f")
-        loose_M = st.number_input("Looseness closure moment (N·mm)", 1e3, 1e7, 5e4,
-                                  1e3, format="%.0e")
-        up_fixity = st.selectbox("Upright global bending (clamping)",
-                                 ["fixed-fixed", "pinned-pinned", "rigid"])
-        k_train = st.number_input("Piston + load-cell stiffness (N/mm)",
-                                  1e3, 1e8, 2e5, 1e4, format="%.0e")
-
-    # ---------- 9. Evaluation ----------
-    st.subheader("9. Evaluation")
-    gamma_M0 = st.number_input("γ_M0 (component resistances)", 1.0, 1.5, 1.0, 0.05)
-    gamma_M = st.number_input("γ_M (connection design moment)", 1.0, 1.5, 1.1, 0.05)
-    eta = st.number_input("η (design moment factor)", 0.5, 1.0, 1.0, 0.05)
-    eta_S = st.number_input("η for idealised S_j = S_j,ini/η", 1.0, 3.5, 2.0, 0.1)
-    braced = st.checkbox("Braced frame (k_b = 8, else 25)", False)
+def card_image(name):
+    path = os.path.join("assets", name)
+    if os.path.exists(path):
+        st.image(path, width="stretch")
 
 
 # ============================================================
-# VALIDATION
+# 1. CLIENT + SECTIONS
 # ============================================================
 
-if missing:
-    st.warning("Enter the required inputs in the sidebar to run the virtual "
-               "test:\n\n" + "\n".join(f"- {m}" for m in missing))
-    st.stop()
-errors = []
-if fu < fy:
-    errors.append("fu must be greater than or equal to fy.")
-if x3 <= x2:
-    errors.append("D3 must be further from the upright than D2.")
-if max(a, x3) > beam_L:
-    errors.append("Piston and sensors must lie on the beam (≤ beam length).")
-if beam_section == "box" and 2 * beam_t >= min(beam_h, beam_b):
-    errors.append("Beam wall thickness is too large for the section.")
-for e in errors:
-    st.error(e)
-if errors:
-    st.stop()
+client = st.text_input("**Client Name**", placeholder="Enter client name")
+mode = st.segmented_control("Section source", ["Select from list", "Customize"],
+                            default="Select from list", label_visibility="collapsed")
+custom = mode == "Customize"
 
+c_up, c_beam, c_con = st.columns(3)
+
+with c_up.container(border=True):
+    card_image("upright.png")
+    if custom:
+        st.markdown("**Customize Upright**")
+        up = {k: num(f"{k} (mm)", f"up_{k}") for k in ("D", "W", "B", "T")}
+        up_name = "Custom upright"
+    else:
+        st.markdown("**Select Upright**")
+        up_name = st.selectbox("Upright", list(catalog.UPRIGHTS), label_visibility="collapsed")
+        up = catalog.UPRIGHTS[up_name]
+        dim_box({f"{k} (MM)": v for k, v in up.items()})
+
+with c_beam.container(border=True):
+    card_image("beam.png")
+    if custom:
+        st.markdown("**Customize Beam**")
+        bm = {k: num(f"{k} (mm)", f"bm_{k}") for k in ("H", "W", "T")}
+        bm["type"] = st.text_input("Enter type of beam", placeholder="Enter value")
+        beam_name = bm["type"] or "Custom beam"
+    else:
+        st.markdown("**Select Type of Beam**")
+        beam_name = st.selectbox("Beam", list(catalog.BEAMS), label_visibility="collapsed")
+        bm = catalog.BEAMS[beam_name]
+        dim_box({f"{k} (MM)": v for k, v in bm.items() if k != "type"})
+
+with c_con.container(border=True):
+    card_image("connector.png")
+    if custom:
+        st.markdown("**Customize Connector**")
+        n = st.selectbox("No. of lip", [3, 4, 5])
+        con = {"n_lips": n, **{k: num(f"{k} (mm)", f"con_{k}") for k in ("H", "D", "W", "T")}}
+        con_name = f"Custom {n} lip connector"
+    else:
+        st.markdown("**Connector Type**")
+        con_name = st.selectbox("Connector", list(catalog.CONNECTORS),
+                                label_visibility="collapsed")
+        con = catalog.CONNECTORS[con_name]
+        dim_box({"NO. OF LIP": con["n_lips"],
+                 **{f"{k} (MM)": con[k] for k in ("H", "D", "W", "T")}})
 
 # ============================================================
-# BUILD MODEL + RUN
+# 2. MATERIAL — IS 2062 : 2011
 # ============================================================
-
-sim = HookConnectorSPM(
-    Material(fy=fy, fu=fu, E=E, nu=nu, name=material_name),
-    BeamSection(beam_section, beam_h, beam_b, beam_t, I_cust, W_cust,
-                length=beam_L, span_for_classification=beam_Lb),
-    UprightSection(up_B, up_D, up_c, up_t, up_perf, up_I, up_H, up_fixity),
-    HookConnector(n_lips=n_lips, plate_thickness=t_p),
-    ComponentParameters(
-        hook_width_bh=b_h or None, hook_bending_length_lh=l_h,
-        hook_shear_length_Lh=L_h, bearing_width=b_brg, bearing_length=L_brg,
-        upright_eff_width_bu=b_u, upright_eff_length_Lu=L_u,
-        lip_eff_width_bl=b_l or None, lip_eff_length_Ll=L_l, gamma_M0=gamma_M0),
-    TestRig(max_defl, stop_sensor, a, x2, x3, k_train, noise),
-    LoadSchedule(load_increment, dt, dial_res),
-    NonlinearOptions(loose, loose_M, psi, hard),
-    Evaluation(gamma_M, eta, braced, eta_S),
-)
-results = sim.run()
-rec = results["record"]
-
-
-# ============================================================
-# METRICS
-# ============================================================
-
-col_a, col_b, col_c, col_d, col_e = st.columns(5)
-k_ti = results["k_ti_Nmm_rad"]
-col_a.metric("Initial Stiffness S_j,ini",
-             f"{results['S_j_ini_Nmm_rad'] / 1e6:.1f} kN·m/rad")
-col_b.metric("Test Stiffness k_ti (D3−D2)",
-             f"{k_ti / 1e6:.1f} kN·m/rad" if np.isfinite(k_ti) else "—")
-col_c.metric("Peak Load", f"{results['P_max_N'] / 1000:.3f} kN")
-col_d.metric("Moment Resistance M_j,Rd",
-             f"{results['M_j_Rd_Nmm'] / 1e6:.3f} kN·m")
-col_e.metric("Joint Classification", results["classification"].split(" (")[0])
-
-st.caption(
-    f"📈 Load increment: **{load_increment} kN/step**  |  "
-    f"Total steps: **{results['total_steps']}**  |  "
-    f"Max deflection: **{max_defl:g} mm on {stop_sensor}**  |  "
-    f"Connector: **{n_lips} lips, {results['connector_height_mm']:.0f} mm**"
-)
 
 st.divider()
+m_mech, m_chem = st.columns(2)
+with m_mech:
+    st.caption("IS 2062 : 2011")
+    st.markdown("**Mechanical Properties**  \n*(Clauses 5, 10.3, 10.3.1, 11.3.1, 12.2 and 12.4)*")
+    grade = st.selectbox("Grade Designation", list(catalog.IS2062_MECHANICAL))
+    mech = catalog.IS2062_MECHANICAL[grade]
+    st.dataframe(pd.DataFrame([
+        {"Quality": q, "Tensile Strength Rm, Min MPa": r["Rm"],
+         "Yield Stress <20": r["ReH <20"], "Yield Stress 20-40": r["ReH 20-40"],
+         "Yield Stress >40": r["ReH >40"], "% Elongation": r["A %"]}
+        for q, r in mech.items()]), hide_index=True, width="stretch")
+with m_chem:
+    st.caption("IS 2062 : 2011")
+    st.markdown("**Chemical Properties**  \n*(Clauses 5, 8.1 and 8.2)*")
+    quality = st.selectbox("Quality", list(mech))
+    st.dataframe(pd.DataFrame([
+        {"Quality": q, "C, Max %": r["C"], "Mn, Max %": r["Mn"], "S, Max %": r["S"],
+         "P, Max %": r["P"], "Si, Max %": r["Si"], "Carbon Equiv. (CE), Max": r["CE"],
+         "Mode of Deoxidation": r["Deoxidation"]}
+        for q, r in catalog.IS2062_CHEMICAL[grade].items()]),
+        hide_index=True, width="stretch")
 
+thicknesses = [t for t in (up.get("T"), bm.get("T"), con.get("T")) if t]
+t_max = max(thicknesses) if thicknesses else 0.0
+fy = catalog.yield_strength(grade, quality, t_max)
+fu = mech[quality]["Rm"]
+st.info(f"**Steel {grade} {quality}:** fy = **{fy} N/mm²** (thickest part {t_max:g} mm "
+        f"< 20 mm band) · fu = **{fu} N/mm²** · E = {E:.0f} N/mm² · "
+        f"G = {G:.0f} N/mm² · ν = {NU}")
 
 # ============================================================
-# CURVES
+# 3. COMPONENT STIFFNESS INPUTS
 # ============================================================
 
-P_kN = np.array(rec["P"]) / 1000.0
+st.divider()
+st.subheader("🧩 Component Stiffness Inputs")
+st.caption("Each component's stiffness is calculated individually from its own "
+           "formula. All values are per lip for C2–C6.")
+
+
+def show_k(label, value):
+    if value is not None:
+        st.markdown(f"**{label} = {value:,.1f} N/mm**")
+
+
+r1 = st.columns(3)
+r2 = st.columns(3)
+
+with r1[0].container(border=True):
+    st.markdown("**C1 · Beam local deformation**  \n`K1 = 3·E·I_b / L³`,  L = 400 mm")
+    I_b = num("I_b — moment of inertia of beam (mm⁴)", "I_b", fmt="%.1f",
+              help=(f"Box {bm['H']:g}×{bm['W']:g}×{bm['T']:g}: "
+                    f"{Beam(bm['H'], bm['W'], bm['T']).I_box:,.0f} mm⁴")
+              if all(bm.get(k) for k in ("H", "W", "T")) else None)
+    show_k("K1", 3 * E * I_b / LOAD_ARM**3 if I_b else None)
+
+with r1[1].container(border=True):
+    st.markdown("**C2 · Hook bending**  \n`K2 = 3·E·I_h / l_h³`")
+    I_h = num("I_h — moment of inertia of hook connector (mm⁴)", "I_h", fmt="%.2f")
+    l_h = num("l_h — effective hook bending length (mm)", "l_h")
+    show_k("K2", 3 * E * I_h / l_h**3 if I_h and l_h else None)
+
+with r1[2].container(border=True):
+    st.markdown("**C3 · Hook shear**  \n`K3 = G·A_h / L_h`,  G = 80769 N/mm²")
+    A_h = num("A_h — effective hook shear area (mm²)", "A_h")
+    L_h = num("L_h — effective hook deformation length (mm)", "L_h")
+    show_k("K3", G * A_h / L_h if A_h and L_h else None)
+
+with r2[0].container(border=True):
+    st.markdown("**C4 · Hook–upright bearing**  \n`K4 = F / δ_bearing`")
+    F_b = num("F — max load at hook–upright contact (N)", "F_b", fmt="%.1f")
+    d_b = num("δ_bearing — max deflection at contact (mm)", "d_b", fmt="%.3f")
+    show_k("K4", F_b / d_b if F_b and d_b else None)
+
+with r2[1].container(border=True):
+    st.markdown("**C5 · Upright local deformation**  \n`K5 = 3·E·I_u / L_u³`")
+    L_u = num("L_u — effective length of deforming upright portion (mm)", "L_u")
+    I_u = num("I_u — second moment of area of effective upright strip (mm⁴)", "I_u",
+              fmt="%.3f")
+    b_u = num("b_u — effective width of upright wall (mm)", "b_u")
+    t_u = num("t_u — thickness of upright (mm)", "t_u", value=up.get("T"))
+    show_k("K5", 3 * E * I_u / L_u**3 if I_u and L_u else None)
+    if b_u and t_u:
+        st.caption(f"Check: b_u·t_u³/12 = {b_u * t_u**3 / 12:,.3f} mm⁴")
+
+with r2[2].container(border=True):
+    st.markdown("**C6 · Upright lip deformation**  \n`K6 = E·b_l·t_l³ / (4·L_l³)`")
+    b_l = num("b_l — effective width of lip (mm)", "b_l")
+    t_l = num("t_l — lip thickness (mm)", "t_l", value=con.get("T"))
+    L_l = num("L_l — effective lip length (mm)", "L_l")
+    show_k("K6", E * b_l * t_l**3 / (4 * L_l**3) if b_l and t_l and L_l else None)
+
+# ============================================================
+# 4. LOAD SCHEDULE + RUN
+# ============================================================
+
+st.divider()
+st.subheader("⚙️ Load Schedule")
+s1, s2, s3 = st.columns([1, 1, 1])
+increment = s1.selectbox("Load increment per step (kN)", [0.01, 0.02],
+                         help="Load starts at 0 kN and increases gradually by this "
+                              "amount per step.")
+d_max = num("Max deflection — test stops when D1 reaches it (mm)", "d_max",
+            container=s2)
+s3.write("")
+s3.write("")
+run = s3.button("▶ Run Virtual Test", type="primary", width="stretch")
+
+if run:
+    if missing:
+        st.session_state.pop("results", None)
+        st.warning("Enter all required inputs first:\n\n"
+                   + "\n".join(f"- {m}" for m in missing))
+    else:
+        try:
+            sim = VirtualSPM(
+                Material(grade, quality, fy, fu),
+                Upright(up["D"], up["W"], up["B"], up["T"]),
+                Beam(bm["H"], bm["W"], bm["T"], bm.get("type", "")),
+                Connector(con["n_lips"], con["H"], con["D"], con["W"], con["T"]),
+                ComponentInputs(I_b, I_h, l_h, A_h, L_h, F_b, d_b,
+                                L_u, I_u, b_u, t_u, b_l, t_l, L_l),
+                TestSetup(increment, d_max),
+            )
+            st.session_state["results"] = {
+                "res": sim.run(), "client": client, "increment": increment,
+                "d_max": d_max, "names": (up_name, beam_name, con_name),
+                "steel": f"IS 2062 {grade} {quality} (fy {fy}, fu {fu})"}
+        except ValueError as exc:
+            st.session_state.pop("results", None)
+            st.error(str(exc))
+
+if "results" not in st.session_state:
+    st.stop()
+
+# ============================================================
+# 5. RESULTS
+# ============================================================
+
+R = st.session_state["results"]
+res, rec = R["res"], R["res"]["record"]
+st.divider()
+st.header(f"📊 Results{' — ' + R['client'] if R['client'] else ''}")
+st.caption(" · ".join(R["names"]) + " · " + R["steel"])
+
+m = st.columns(4)
+m[0].metric("Rotational stiffness — elastic  S_j,ini", f"{res['S_j_ini'] / 1e6:.2f} kN·m/rad")
+m[1].metric("Rotational stiffness — plastic  S_j", f"{res['S_j'] / 1e6:.2f} kN·m/rad")
+m[2].metric("Moment resistance — elastic  M_j,el", f"{res['M_j_el'] / 1e6:.3f} kN·m")
+m[3].metric("Moment resistance — plastic  M_j,Rd", f"{res['M_j_Rd'] / 1e6:.3f} kN·m")
+st.caption(
+    f"📈 Load increment: **{R['increment']} kN/step** | Total steps: **{res['steps']}** | "
+    f"Max deflection: **{R['d_max']:g} mm** | Peak load: **{res['P_peak'] / 1000:.3f} kN** | "
+    f"M_j,Rd governed by: **{res['M_governed_by']}**")
+
+P_kN = np.array(rec["P"]) / 1000
 fig, axes = plt.subplots(1, 3, figsize=(17, 5))
 
-# --- Load vs Deflection ---
 ax = axes[0]
-ax.plot(rec["D1"], P_kN, "g-", lw=2.0, label=f"D1 piston ({a:.0f} mm)")
-ax.plot(rec["D2"], P_kN, "b-", lw=2.0, label=f"D2 ({x2:.0f} mm)")
-ax.plot(rec["D3"], P_kN, "r--", lw=1.5, label=f"D3 ({x3:.0f} mm)")
-ax.axhline(results["M_j_Rd_Nmm"] / a / 1000, color="orange", ls=":", alpha=0.8,
-           label="M_j,Rd / a")
-ax.set_xlabel("Displacement (mm)")
-ax.set_ylabel("Load P (kN)")
-ax.set_title("Load vs Displacement (all sensors)")
+ax.plot(rec["D1"], P_kN, "g-", lw=2, label="D1 piston")
+ax.plot(rec["D2"], P_kN, "b-", lw=2, label="D2 LVDT (40 mm)")
+ax.plot(rec["D3"], P_kN, "r--", lw=1.5, label="D3 LVDT (140 mm)")
+ax.axhline(res["P_el"] / 1000, color="orange", ls=":", alpha=0.8, label="Elastic limit")
+ax.axhline(res["P_Rd"] / 1000, color="grey", ls=":", alpha=0.8, label="Plastic limit")
+ax.set(xlabel="Displacement (mm)", ylabel="Load P (kN)",
+       title="Load vs Displacement (all sensors)")
 ax.grid(True, alpha=0.3)
 ax.legend(loc="lower right", fontsize=8)
 
-# --- Moment vs Rotation ---
 ax = axes[1]
-th = np.array(rec["theta_corr"])
-Mk = np.array(rec["M"]) / 1e6
-ax.plot(th, Mk, "r-", lw=2.2, label="θ = (D3 − D2) / (x3 − x2)")
-th_line = np.linspace(0, min(th.max(), 1.2 * Mk.max() * 1e6
-                             / results["S_j_ini_Nmm_rad"]), 50)
-ax.plot(th_line, results["S_j_ini_Nmm_rad"] * th_line / 1e6, "k:", lw=1.2,
-        label="S_j,ini")
-if np.isfinite(k_ti):
-    ax.plot([0, results["M_Rd_Nmm"] / k_ti], [0, results["M_Rd_Nmm"] / 1e6],
-            "b--", lw=1.4, label="k_ti (equal area)")
-ax.set_ylim(0, Mk.max() * 1.1 if Mk.max() > 0 else 1)
-ax.set_xlabel("Rotation θ (rad)")
-ax.set_ylabel("Moment M (kN·m)")
-ax.set_title("Moment vs Rotation")
+th = np.array(rec["theta_meas"])
+ax.plot(th, np.array(rec["M"]) / 1e6, "r-", lw=2.2, label="Test: θ = (D3 − D2)/100")
+ax.plot(rec["theta"], np.array(rec["M"]) / 1e6, "k:", lw=1.3, label="Connection only")
+ax.axhline(res["M_j_el"] / 1e6, color="orange", ls=":", label="M_j,el")
+ax.axhline(res["M_j_Rd"] / 1e6, color="grey", ls=":", label="M_j,Rd")
+ax.set(xlabel="Rotation θ (rad)", ylabel="Moment M (kN·m)", title="Moment vs Rotation")
 ax.grid(True, alpha=0.3)
 ax.legend(loc="lower right", fontsize=8)
 
-# --- Load vs Step ---
 ax = axes[2]
-ax.plot(rec["step"], P_kN, "m-", lw=2.0)
-ax.set_xlabel("Step number")
-ax.set_ylabel("Load P (kN)")
-ax.set_title(f"Load vs Step (increment = {load_increment} kN)")
+ax.plot(rec["step"], P_kN, "m-", lw=2)
+ax.set(xlabel="Step number", ylabel="Load P (kN)",
+       title=f"Load vs Step (increment = {R['increment']} kN)")
 ax.grid(True, alpha=0.3)
-
 plt.tight_layout()
 st.pyplot(fig)
 
-st.divider()
+st.subheader("🧩 Component Analysis")
+comp_df = pd.DataFrame(res["components"])
+comp_df = comp_df.round({"Stiffness K (N/mm)": 1, "Resistance F_Rd (N)": 0,
+                         "Deformation δ (mm)": 4})
+st.dataframe(comp_df, hide_index=True, width="stretch")
+st.caption(f"Per lip: C2–C6 in series → k_lip = {res['k_lip']:,.1f} N/mm; "
+           f"governing component: {res['governing']}. Deformation δ at the last "
+           "recorded load.")
+with st.expander("Lip assembly (lever arms to connector bottom edge)"):
+    st.dataframe(pd.DataFrame(res["lips"]).round(3), hide_index=True, width="stretch")
 
-
-# ============================================================
-# COMPONENT TABLE
-# ============================================================
-
-st.subheader("🧩 Component Yield Check (Component Method, EN 1993-1-8)")
-comp_df = pd.DataFrame([
-    {
-        "Component": c["Component"],
-        "Stiffness K (N/mm)": f"{c['Stiffness K (N/mm)']:.1f}",
-        "Resistance F_Rd (N)": f"{c['Resistance F_Rd (N)']:.0f}",
-        "Force at peak (N)": f"{c['Force at peak (N)']:.0f}",
-        "Deformation δ (mm)": f"{c['Deformation δ at peak (mm)']:.4f}",
-        "Yielded at peak?": "✅ YES" if c["Yielded?"] else "—",
-    }
-    for c in results["component_table"]
-])
-st.dataframe(comp_df, width="stretch", hide_index=True)
-
-with st.expander("Per-lip assembly (C2–C6 in series, lever arm z to connector bottom)"):
-    st.dataframe(pd.DataFrame(results["rows_table"]).round(1),
-                 width="stretch", hide_index=True)
-
-
-# ============================================================
-# SUMMARY
-# ============================================================
-
-st.subheader("📋 Summary")
-lims = results["class_limits_Nmm_rad"]
-summary_df = pd.DataFrame({
-    "Quantity": [
-        "Young's Modulus E", "Shear Modulus G", "Yield Strength fy",
-        "Beam I_b", "Beam W_pl", "Upright I_u",
-        "Load arm a (D1)", "Load increment", "Total steps", "Stop reason",
-        "Beam stiffness K1 = 3EI_b/a³",
-        "Equivalent lever arm z_eq", "Equivalent stiffness k_eq",
-        "Initial stiffness S_j,ini = Σ k_eff z²",
-        "Idealised stiffness S_j = S_j,ini/η",
-        "Moment resistance M_j,Rd = Σ F_Rd z",
-        "Test stiffness k_ti (equal area)", "Secant stiffness 10–40 % M_max",
-        "Peak moment M_max", "Design moment M_Rd = η M_max/γ_M",
-        "Rotation capacity φ = t_p/h_e", "Max rotation in test",
-        "Stiffness classification", "Strength classification",
-    ],
-    "Value": [
-        f"{E:.0f} N/mm²", f"{E / (2 * (1 + nu)):.0f} N/mm²", f"{fy:.0f} N/mm²",
-        f"{results['I_beam_mm4']:.3e} mm⁴", f"{sim.Wpl_b:.3e} mm³",
-        f"{results['I_upright_mm4']:.3e} mm⁴",
-        f"{a:.0f} mm", f"{load_increment} kN", f"{results['total_steps']}",
-        results["stop_reason"],
-        f"{results['K1_N_mm']:.1f} N/mm",
-        f"{results['z_eq_mm']:.1f} mm", f"{results['k_eq_N_mm']:.0f} N/mm",
-        f"{results['S_j_ini_Nmm_rad'] / 1e6:.2f} kN·m/rad",
-        f"{results['S_j_ideal_Nmm_rad'] / 1e6:.2f} kN·m/rad",
-        f"{results['M_j_Rd_Nmm'] / 1e6:.3f} kN·m",
-        f"{k_ti / 1e6:.2f} kN·m/rad" if np.isfinite(k_ti) else "—",
-        f"{results['k_secant_Nmm_rad'] / 1e6:.2f} kN·m/rad",
-        f"{results['M_max_Nmm'] / 1e6:.3f} kN·m",
-        f"{results['M_Rd_Nmm'] / 1e6:.3f} kN·m",
-        f"{results['theta_avail_rad']:.4f} rad",
-        f"{results['theta_max_rad']:.4f} rad",
-        results["classification"]
-        + (f" ({lims[0] / 1e6:.1f} – {lims[1] / 1e6:.1f} kN·m/rad)" if lims else ""),
-        results["strength_classification"],
-    ],
-})
-st.dataframe(summary_df, width="stretch", hide_index=True)
-
-
-# ============================================================
-# WARNINGS
-# ============================================================
-
-for c in results["component_table"]:
-    if c["Yielded?"]:
-        st.info(f"🔵 {c['Component']} yielded — post-yield stiffness reduced.")
-if results["rotation_capacity_exceeded"]:
-    st.warning(f"⚠️ Rotation {results['theta_max_rad']:.4f} rad exceeds the "
-               f"available rotation φ = t_p/h_e = {results['theta_avail_rad']:.4f} rad.")
-if results["peak_reached"]:
-    st.error(f"🚨 {results['stop_reason']}. Peak load "
-             f"{results['P_cap_N'] / 1000:.3f} kN.")
+if res["plastic_plateau"]:
+    st.warning(f"M_j,Rd reached at P = {res['P_Rd'] / 1000:.3f} kN; the load was held "
+               f"while deflection increased to {R['d_max']:g} mm.")
 else:
-    st.success(f"⏹ {results['stop_reason']} at P = {results['P_max_N'] / 1000:.3f} kN.")
+    st.success(f"Max deflection {R['d_max']:g} mm reached at P = "
+               f"{res['P_peak'] / 1000:.3f} kN.")
 
-
-# ============================================================
-# SENSOR DATA + CSV
-# ============================================================
-
-st.divider()
-st.subheader("📡 Sensor Data (D1, D2, D3)")
-
-
-def quantise(v, q):
-    return np.round(np.round(np.asarray(v) / q) * q, 6)
-
-
+st.subheader("📡 Sensor Data")
 sensor_df = pd.DataFrame({
-    "Load 1 kN": np.round(P_kN, 3),
-    "Dial 1 mm": quantise(rec["D1"], dial_res),
-    "Dial 2 mm": quantise(rec["D2"], dial_res),
-    "Dial 3 mm": quantise(rec["D3"], dial_res),
-    "Time Sec.": np.round(rec["time_s"], 3),
+    "Load (kN)": np.round(P_kN, 3),
+    "D1 piston (mm)": np.round(rec["D1"], 2),
+    "D2 (mm)": np.round(rec["D2"], 2),
+    "D3 (mm)": np.round(rec["D3"], 2),
 })
-detail_df = pd.DataFrame({
-    "Step": rec["step"], "Time (s)": rec["time_s"], "Load (N)": rec["P"],
-    "D1_piston_mm": rec["D1"], "D2_mm": rec["D2"], "D3_mm": rec["D3"],
-    "Moment (N·mm)": rec["M"],
-    "Rotation (D3-D2)/dx (rad)": rec["theta_meas"],
-    "Rotation corrected (rad)": rec["theta_corr"],
-})
-for idx, f in results["row_forces"].items():
-    detail_df[f"Lip{idx} force (N)"] = f
-
 with st.expander("🔍 View sensor data", expanded=True):
-    st.dataframe(sensor_df, width="stretch", height=350, hide_index=True)
+    st.dataframe(sensor_df, hide_index=True, width="stretch", height=320)
 
-st.download_button("📥 Download sensor readings (CSV)",
+summary_df = pd.DataFrame({
+    "Quantity": ["Client", "Upright", "Beam", "Connector", "Steel",
+                 "Rotational stiffness elastic S_j,ini (kN·m/rad)",
+                 "Rotational stiffness plastic S_j (kN·m/rad)",
+                 "Moment resistance elastic M_j,el (kN·m)",
+                 "Moment resistance plastic M_j,Rd (kN·m)"]
+    + [f"{c['Component']} K (N/mm)" for c in res["components"]],
+    "Value": [R["client"], *R["names"], R["steel"],
+              round(res["S_j_ini"] / 1e6, 3), round(res["S_j"] / 1e6, 3),
+              round(res["M_j_el"] / 1e6, 4), round(res["M_j_Rd"] / 1e6, 4)]
+    + [round(c["Stiffness K (N/mm)"], 1) for c in res["components"]],
+})
+d1, d2 = st.columns(2)
+d1.download_button("📥 Download sensor readings (CSV)",
                    sensor_df.to_csv(index=False).encode("utf-8"),
-                   "spm_sensor_readings.csv", "text/csv")
-st.download_button("📥 Download detailed readings (CSV)",
-                   detail_df.to_csv(index=False).encode("utf-8"),
-                   "spm_detailed_readings.csv", "text/csv")
-st.download_button("📥 Download summary (CSV)",
-                   pd.concat([summary_df, comp_df.rename(
-                       columns={"Component": "Quantity"})], axis=0)
-                   .to_csv(index=False).encode("utf-8"),
-                   "spm_summary.csv", "text/csv")
+                   "spm_sensor_readings.csv", "text/csv", width="stretch")
+d2.download_button("📥 Download results summary (CSV)",
+                   summary_df.to_csv(index=False).encode("utf-8"),
+                   "spm_results_summary.csv", "text/csv", width="stretch")
