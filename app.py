@@ -5,6 +5,7 @@ COP-style component analysis of the assembly  UPRIGHT + BEAM + HOOK CONNECTOR.
 Run with:  streamlit run app.py
 """
 
+import base64
 import os
 
 import matplotlib.pyplot as plt
@@ -55,10 +56,19 @@ def dim_box(values: dict):
     st.markdown(f"<div class='dim-box'>{cells}</div>", unsafe_allow_html=True)
 
 
-def card_image(name):
-    path = os.path.join("assets", name)
+ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+
+
+def card_image(name, height=170):
+    """Section drawing centred at a fixed height, as on the client frontend."""
+    path = os.path.join(ASSETS, name)
     if os.path.exists(path):
-        st.image(path, width="stretch")
+        with open(path, "rb") as f:
+            data = base64.b64encode(f.read()).decode()
+        st.markdown(f"<div style='text-align:center;margin-bottom:8px'>"
+                    f"<img src='data:image/png;base64,{data}' "
+                    f"style='height:{height}px;max-width:100%;object-fit:contain'></div>",
+                    unsafe_allow_html=True)
 
 
 # ============================================================
