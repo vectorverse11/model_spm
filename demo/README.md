@@ -21,3 +21,6 @@ The component inputs are **illustrative only**, not measured values:
 | L_l | 20 mm |
 
 Load schedule: 0.01 kN steps, max deflection 50 mm.
+
+## Stiffness Calculator screenshots
+`6_` and `7_` were taken with the 3-lip values from CBFEM_formulae.pdf. I_h = 100000 mm⁴, A_h = 300 mm² and F = 10000 N are **placeholders** (unknown in the PDF).

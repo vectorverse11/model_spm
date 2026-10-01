@@ -1,26 +1,70 @@
 # Virtual SPM — Component-Method Beam Stiffness Tester
 
-A software-only replica of the beam-end hook-connector test machine for steel
-storage racking. It follows the COP-style component analysis. The assembly
-**upright + beam + hook connector** is split into components, and each
-component's stiffness is calculated from its own formula. The components are
-then assembled into the joint's rotational stiffness and moment resistance, and
-a virtual cantilever test is run.
+A software-only tool for the beam-end hook-connector joint used in steel storage
+racking: **upright + beam + hook connector**. It follows the COP-style component
+analysis. Each component's stiffness is calculated from its own formula, and the
+components are then assembled into the joint stiffness.
+
+The app has two pages, chosen in the sidebar:
+
+| Page | What it does |
+|---|---|
+| **📐 Stiffness Calculator** (default) | CBFEM **initial stiffness S_j,ini** and **secant stiffness S_j** for the 3-lip hook connector. Every dimension is entered by the user. |
+| **🧪 Virtual Test** | The virtual beam-stiffness test machine: load steps, D1/D2/D3 sensors, curves and CSV. |
 
 ## Install / Run
 ```bash
 pip install -r requirements.txt
 streamlit run app.py          # opens http://localhost:8501
-python -m pytest -q tests     # engine checks (optional)
+python -m pytest -q tests     # checks (optional)
 ```
 
 ## Files
 | File | Purpose |
 |---|---|
-| `app.py` | Streamlit interface |
-| `physics_engine.py` | Component formulae, assembly and the virtual test |
-| `catalog.py` | "Select from list" sections and the IS 2062 : 2011 tables — add more entries here |
-| `assets/` | Optional drawings shown on the cards: `upright.png`, `beam.png`, `connector.png` |
+| `app.py` | Entry point: page navigation |
+| `stiffness_page.py`, `cbfem.py` | Stiffness Calculator page and its formulae |
+| `virtual_test_page.py`, `physics_engine.py`, `catalog.py` | Virtual Test page, its engine, and the list sections plus IS 2062 tables |
+| `assets/` | Section drawings shown on the Virtual Test cards |
+
+## Stiffness Calculator (CBFEM)
+Fixed values: E = 210000 N/mm², G = 80769 N/mm², ν = 0.3. All other values are user inputs.
+
+**Geometry**
+| Input | Meaning |
+|---|---|
+| H | Total hook-connector height, also used as the lever arm h |
+| H_t | Connector above the beam top |
+| Beam depth | Height of the beam |
+| t_p | Connector thickness |
+
+From these, the calculator works out:
+* `H_b = H − (H_t + beam depth)`
+* `θ_available = tan⁻¹(t_p / H_b)`
+* `δ_bearing = θ_available · H_b = t_p`
+
+**Component stiffness (N/mm)**
+| | Component | Formula |
+|---|---|---|
+| C1 | Beam local deformation | `K1 = 3·E·I_b / L_b³` |
+| C2 | Hook bending | `K2 = 3·E·I_h / L_h³` |
+| C3 | Hook shear | `K3 = G·A_h / L_h` |
+| C4 | Hook–upright bearing | `K4 = F / δ_bearing = F / t_p` |
+| C5 | Upright local deformation | `K5 = 3·E·I_u / L_u³` |
+| C6 | Upright lip deformation | `K6 = E·b_l·t_l³ / (4·L_l³)` |
+
+**Joint stiffness (all six components, EN 1993-1-8 §6.3.1)**
+```
+S_j,ini = E·h² / Σ(1/k_i)        k_i = K_i / E   (stiffness coefficients, mm)
+        = h² / Σ(1/K_i)           (same value, using K_i in N/mm)
+S_j     = S_j,ini / 2
+Check:    S_j,ini > 0.5·E·I_b / L_b
+```
+The K_i in N/mm already contain E. So the Eurocode form uses k_i = K_i / E; multiplying the N/mm values by E again would make the result 210,000 times too large.
+
+The results page shows each K, a step-by-step working that can be checked by hand, and a CSV download.
+
+# Virtual Test page
 
 ## Interface flow
 1. **Client name.**
