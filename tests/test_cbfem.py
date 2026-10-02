@@ -7,7 +7,7 @@ import math
 
 import pytest
 
-from cbfem import E, G, LOAD_ARM, CBFEMInputs, H_b, run, theta_available
+from cbfem import E, G, LOAD_ARM, CBFEMInputs, H_b, delta_max, run, theta_available
 
 PDF_3LIP = dict(H=155.0, H_t=55.0, beam_depth=80.0, t_p=3.0,
                 I_b=410438.0, L_b=400.0, L_h=155.0,
@@ -28,8 +28,15 @@ def test_max_deflection_from_geometry():
     assert H_b(i) == 20.0
     assert theta_available(i) == pytest.approx(0.149, abs=5e-4)
     assert math.degrees(theta_available(i)) == pytest.approx(8.5307, abs=1e-3)
-    r = run(i, 0.01)
-    assert r["D_max"]["D1"] == pytest.approx(400 * 3 / 20)   # x * tan(theta)
+
+
+
+def test_max_deflection_formula():
+    # delta_max = P a^2 (3l - a) / (6 E I), a = 400, l = 500, I = I_b
+    assert delta_max(1000.0, 410438.0) == pytest.approx(
+        1000 * 400**2 * (3 * 500 - 400) / (6 * 210000 * 410438))
+    r = run(inp(), 0.01)
+    assert r["delta_max"] == pytest.approx(delta_max(r["F"], 410438.0))
 
 
 def test_fixed_component_values_by_hand():
@@ -71,7 +78,7 @@ def test_virtual_test_runs_from_zero_to_max_deflection(inc):
     assert rec["P"][1] == pytest.approx(inc * 1000)
     assert rec["P"][-1] == pytest.approx(r["F"])
     assert rec["theta"][-1] == pytest.approx(r["theta_available_rad"])
-    assert rec["D1"][-1] == pytest.approx(r["D_max"]["D1"])
+    assert rec["D1"][-1] == pytest.approx(400 * math.tan(r["theta_available_rad"]))
     assert all(b >= a for a, b in zip(rec["D1"], rec["D1"][1:]))
     # elastic slope is S_j,ini
     assert rec["M"][1] / rec["theta"][1] == pytest.approx(r["S_j_ini"])

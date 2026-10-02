@@ -9,10 +9,11 @@ bearing stiffness K4, then generates the curves.
 
 Fixed values (steel): E = 210000 N/mm^2, G = 80769 N/mm^2, nu = 0.3
 
-1. Maximum deflection (from the geometry)
+1. Stop condition and maximum deflection
        H_b             = H - (H_t + beam depth)
        theta_available = tan^-1(t_p / H_b)            (rad)  -> test stops here
-       D(x)_max        = x * tan(theta_available)     at each sensor position x
+       delta_max       = P a^2 (3 l - a) / (6 E I_b)  at the stop load P = F
+                         (a = 400 mm, l = 500 mm, I_b = beam inertia, x-axis)
 
 2. Component stiffnesses (N/mm)
        K1 = 3 E I_b / L_b^3        beam local deformation
@@ -55,7 +56,8 @@ G = E / (2.0 * (1.0 + NU))      # 80769 N/mm^2
 ETA = 2.0                       # S_j = S_j,ini / 2
 
 # Test rig (fixed)
-LOAD_ARM = 400.0                # D1 piston, mm from upright face
+LOAD_ARM = 400.0                # a: D1 piston / load point, mm from upright face
+BEAM_LENGTH = 500.0             # l: beam length, mm
 X_D2 = 40.0
 X_D3 = 140.0
 
@@ -81,6 +83,13 @@ class CBFEMInputs:
     b_l: float          # effective lip width, mm
     t_l: float          # lip thickness, mm
     L_l: float          # effective lip length, mm
+
+
+def delta_max(P: float, I_b: float) -> float:
+    """Max deflection of the beam (cantilever, load P at a, length l):
+    delta_max = P a^2 (3 l - a) / (6 E I_b)."""
+    a, l = LOAD_ARM, BEAM_LENGTH
+    return P * a**2 * (3.0 * l - a) / (6.0 * E * I_b)
 
 
 def H_b(inp: CBFEMInputs) -> float:
@@ -211,8 +220,7 @@ def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
         "H_b": hb,
         "theta_available_rad": th_av,
         "theta_available_deg": degrees(th_av),
-        "D_max": {"D1": a * tan(th_av), "D2": X_D2 * tan(th_av),
-                  "D3": X_D3 * tan(th_av)},
+        "delta_max": delta_max(F, inp.I_b),          # mm, at the stop load F
         "delta_bearing": t_p,
         "h": h,
         "R_without_K4": R,
