@@ -12,11 +12,12 @@ at which it is reached, K4 = F / t_p, the **initial stiffness S_j,ini** and the
 deflection are **not** inputs: the test stops at the max deflection.
 
 ## Install / Run
+Requires Python 3.10 or newer.
 ```bash
-pip install -r requirements.txt
-python -m streamlit run app.py   # opens http://localhost:8501
-python -m pytest -q tests        # checks (optional)
+python -m pip install -r requirements.txt
+python -m streamlit run app.py      # opens http://localhost:8501
 ```
+Optional checks: `python -m pip install pytest`, then `python -m pytest -q tests`.
 
 ## Files
 | File | Purpose |
@@ -25,7 +26,6 @@ python -m pytest -q tests        # checks (optional)
 | `stiffness_page.py` | CBFEM Virtual Test page (inputs, results, curves, CSV) |
 | `cbfem.py` | Formulae and the virtual test engine |
 | `tests/test_cbfem.py` | Checks against hand calculations |
-| `assets/` | Section drawings (upright, beam, connector) |
 
 ## CBFEM Virtual Test
 Fixed values: E = 210000 N/mm², G = 80769 N/mm², ν = 0.3.
