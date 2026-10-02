@@ -8,8 +8,9 @@ components are then assembled into the joint stiffness.
 The app is the **CBFEM Virtual Test**. It calculates the max deflection δ_max
 from the max load P, then raises the load until the D1 reading reaches δ_max.
 It notes that load F, calculates K4 = F / t_p, the **initial stiffness S_j,ini**
-and the **secant stiffness S_j**, and generates the curves and CSV. It covers the
-3-lip hook connector, and all dimensions are entered by the user.
+and the **secant stiffness S_j**, and generates the curves and CSV. It works for any
+hook connector (3, 4 or 5 lips). The sections, component properties and max load are
+all entered by the user.
 
 ## Install / Run
 Requires Python 3.10 or newer.
@@ -25,18 +26,29 @@ Optional checks: `python -m pip install pytest`, then `python -m pytest -q tests
 | `app.py` | Entry point |
 | `stiffness_page.py` | CBFEM Virtual Test page (inputs, results, curves, CSV) |
 | `cbfem.py` | Formulae and the virtual test engine |
+| `catalog.py` | "Select from list" sections and the IS 2062 : 2011 tables (add entries here) |
+| `assets/` | Section drawings shown on the upright, beam and connector cards |
 | `tests/test_cbfem.py` | Checks against hand calculations |
 
 ## CBFEM Virtual Test
 Fixed values: E = 210000 N/mm², G = 80769 N/mm², ν = 0.3. Rig: a = 400 mm (load point / D1 piston), l = 500 mm (beam length), D2 = 40 mm, D3 = 140 mm.
 
 **Inputs (from the user):**
-* Geometry: H (total connector height, also h), H_t, beam depth, t_p
+* Client name
+* Sections, picked with **Select from list** or entered with **Customize**:
+  * Upright: D, W, B, T
+  * Beam: H, W, T, type
+  * Hook connector: no. of lips, H, D, W, T
+* Material: IS 2062 : 2011 grade and quality, with the mechanical and chemical tables shown
+* Geometry for CBFEM:
+  * H (= h) and t_p come from the connector card (H and T)
+  * Beam depth comes from the beam card (H)
+  * H_t is entered
 * Component properties: I_b, L_b, I_h, L_h, A_h, I_u, L_u, b_l, t_l, L_l
-* P, the max load (default 3.86 kN, editable). It is used only for δ_max.
+* **P, the max load (kN)**. It is used only for δ_max.
 * Load increment: 0.01 or 0.02 kN
 
-**Calculated by the virtual machine:** δ_max, the stop load F, K4, S_j,ini and S_j.
+**Calculated by the virtual machine:** δ_max, the stop load F, the moment M = F × a, K4, S_j,ini and S_j.
 
 **1 – Max deflection (stop condition)**
 ```
@@ -70,7 +82,7 @@ Check:    S_j,ini > 0.5·E·I_b / L_b
 * F is the load at which D1 = δ_max. Because K4 = F / t_p changes S_j,ini, F is found so that the two agree.
 
 **Outputs:**
-* δ_max, F, K4, S_j,ini, S_j and the check
+* δ_max, F, moment M = F × a, K4, S_j,ini, S_j and the check
 * Graphs: Load vs Displacement, Moment vs Rotation, Load vs Step
 * Step-by-step working
-* Sensor CSV (Load, D1, D2, D3) and a results CSV
+* Sensor CSV (Load, Moment, D1, D2, D3) and a results CSV

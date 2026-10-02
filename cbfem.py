@@ -1,17 +1,18 @@
 """
-CBFEM Virtual Test — hook-connector joint (3-lip)
-=================================================
+CBFEM Virtual Test — hook-connector joint
+=========================================
 
-Component-based method for the assembly UPRIGHT + BEAM + HOOK CONNECTOR.
-Every dimension is entered by the user.
+Component-based method for the assembly UPRIGHT + BEAM + HOOK CONNECTOR
+(any hook connector — 3, 4 or 5 lips). Every dimension, and the max load P,
+is entered by the user.
 
 Fixed values (steel): E = 210000 N/mm^2, G = 80769 N/mm^2, nu = 0.3
 Rig: a = 400 mm (load point / D1 piston), l = 500 mm (beam length),
      sensors D2 = 40 mm, D3 = 140 mm from the upright face.
 
 1. Max deflection (stop condition)
-       delta_max = P a^2 (3 l - a) / (6 E I_b)     P = MAX load (3.86 kN), not
-                                                   the step load
+       delta_max = P a^2 (3 l - a) / (6 E I_b)     P = MAX load (user input),
+                                                   not the step load
    The load rises from 0 kN in steps of 0.01 / 0.02 kN; when the D1 piston
    reading reaches delta_max the test stops and the load is noted as F.
 
@@ -52,7 +53,6 @@ LOAD_ARM = 400.0                # a: D1 piston / load point, mm from upright fac
 BEAM_LENGTH = 500.0             # l: beam length, mm
 X_D2 = 40.0
 X_D3 = 140.0
-P_MAX_KN = 3.86                 # P used for delta_max (kN)
 
 
 @dataclass
@@ -77,7 +77,7 @@ class CBFEMInputs:
     t_l: float          # lip thickness, mm
     L_l: float          # effective lip length, mm
     # Max deflection
-    P_max_kN: float = P_MAX_KN   # load P used in delta_max, kN
+    P_max_kN: float     # max load P used in delta_max, kN (user input)
 
 
 def deflection(P: float, I_b: float) -> float:
@@ -220,7 +220,7 @@ def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
         "K_total": K_total,
         "S_j_ini": S_ini,
         "S_j": S_j,
-        "M_max": M_max,
+        "M_max": M_max,                               # N mm, moment at the stop: F * a
         "M_el": 2.0 / 3.0 * M_max,
         "check_limit": limit,
         "check_ok": S_ini > limit,

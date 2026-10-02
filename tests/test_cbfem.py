@@ -5,12 +5,13 @@ not given there, so test-only placeholders are used for them.
 """
 import pytest
 
-from cbfem import (E, G, LOAD_ARM, P_MAX_KN, CBFEMInputs, H_b, deflection, run)
+import catalog
+from cbfem import (E, G, LOAD_ARM, CBFEMInputs, H_b, deflection, run)
 
 PDF_3LIP = dict(H=155.0, H_t=55.0, beam_depth=80.0, t_p=3.0,
                 I_b=410438.0, L_b=400.0, L_h=155.0,
                 I_u=378760.0, L_u=800.0, b_l=12.1, t_l=3.0, L_l=21.6)
-PLACEHOLDER = dict(I_h=1.0e5, A_h=300.0)
+PLACEHOLDER = dict(I_h=1.0e5, A_h=300.0, P_max_kN=3.86)
 
 
 def inp(**over):
@@ -19,7 +20,18 @@ def inp(**over):
 
 def test_fixed_values():
     assert (E, round(G)) == (210000.0, 80769)
-    assert P_MAX_KN == 3.86
+
+
+def test_max_load_is_required():
+    with pytest.raises(TypeError):
+        CBFEMInputs(**PDF_3LIP, I_h=1.0e5, A_h=300.0)        # no P_max_kN
+
+
+def test_catalog_sections():
+    con = catalog.CONNECTORS["5 Lip Connector 245mm"]
+    assert (con["n_lips"], con["H"], con["T"]) == (5, 245.0, 4.0)
+    assert catalog.CONNECTORS["3 Lip Connector 155mm"]["H"] == 155.0
+    assert catalog.BEAMS["Beam 80 x 50 x 1.5mm"]["T"] == 1.5
 
 
 def test_max_deflection_from_max_load():
@@ -28,6 +40,18 @@ def test_max_deflection_from_max_load():
     assert deflection(3860.0, 410438.0) == pytest.approx(expected)
     assert run(inp(), 0.01)["delta_max"] == pytest.approx(expected)     # 1.3137 mm
     assert expected == pytest.approx(1.3137, abs=1e-4)
+
+
+def test_moment_output():
+    r = run(inp(), 0.01)
+    assert r["M_max"] == pytest.approx(r["F"] * LOAD_ARM)            # M = F * a
+    assert r["record"]["M"][-1] == pytest.approx(r["M_max"])
+
+
+def test_works_for_5_lip_connector():
+    r = run(inp(H=245.0, t_p=4.0, P_max_kN=5.0), 0.02)
+    assert r["F"] > 0 and r["K4"] == pytest.approx(r["F"] / 4.0)
+    assert r["record"]["D1"][-1] == pytest.approx(r["delta_max"])
 
 
 def test_test_stops_when_D1_reaches_delta_max():
