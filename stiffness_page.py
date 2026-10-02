@@ -9,14 +9,14 @@ secant stiffness, and generates the curves.
 Page "CBFEM Virtual Test" of the app — run with:  streamlit run app.py
 """
 
-from math import atan, degrees, tan
+from math import atan, degrees
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-from cbfem import E, G, LOAD_ARM, NU, X_D2, X_D3, CBFEMInputs, run
+from cbfem import BEAM_LENGTH, E, G, LOAD_ARM, NU, X_D2, X_D3, CBFEMInputs, run
 
 st.title("🏗️ CBFEM Virtual Test — Initial & Secant Stiffness")
 st.caption("Component Based Finite Element Method · Upright + Beam + Hook Connector · "
@@ -73,12 +73,13 @@ if H and H_t and beam_depth and t_p:
     if hb > 0:
         th = atan(t_p / hb)
         st.info(
-            f"**Max deflection (calculated):** H_b = H − (H_t + beam depth) = "
+            f"**Test stop (calculated):** H_b = H − (H_t + beam depth) = "
             f"{H:g} − ({H_t:g} + {beam_depth:g}) = **{hb:g} mm** · "
             f"θ_available = tan⁻¹(t_p / H_b) = tan⁻¹({t_p:g}/{hb:g}) = "
-            f"**{degrees(th):.4f}° = {th:.4f} rad** · D1 max = {LOAD_ARM:g} × "
-            f"tan θ_available = **{LOAD_ARM * tan(th):.2f} mm** · "
-            f"δ_bearing = θ_available × H_b = t_p = **{t_p:g} mm**")
+            f"**{degrees(th):.4f}° = {th:.4f} rad** · "
+            f"δ_bearing = θ_available × H_b = t_p = **{t_p:g} mm** · "
+            f"max deflection δ_max = P·a²(3l − a)/(6·E·I_b) is calculated at the "
+            f"stop load.")
     else:
         st.error(f"H_b = {H:g} − ({H_t:g} + {beam_depth:g}) = {hb:g} mm. "
                  "It must be greater than 0.")
@@ -168,15 +169,16 @@ res, inp, rec = R["res"], R["inp"], R["res"]["record"]
 # ============================================================
 
 st.header("📊 Results")
-st.success(f"⏹ Test stopped at the max deflection θ_available = "
-           f"{res['theta_available_rad']:.4f} rad (D1 = {res['D_max']['D1']:.2f} mm) "
+st.success(f"⏹ Test stopped at θ_available = {res['theta_available_rad']:.4f} rad "
            f"after {res['steps']} steps. Load noted: **F = {res['F']:,.2f} N "
-           f"({res['F'] / 1000:.4f} kN)**.")
+           f"({res['F'] / 1000:.4f} kN)** · max deflection "
+           f"**δ_max = {res['delta_max']:.4f} mm**.")
 
 m1 = st.columns(4)
-m1[0].metric("Max deflection θ_available", f"{res['theta_available_rad']:.4f} rad",
+m1[0].metric("Stop rotation θ_available", f"{res['theta_available_rad']:.4f} rad",
              f"{res['theta_available_deg']:.3f}°", delta_color="off")
-m1[1].metric("D1 at max deflection", f"{res['D_max']['D1']:.2f} mm")
+m1[1].metric("Max deflection δ_max", f"{res['delta_max']:.4f} mm",
+             "P·a²(3l − a) / 6EI", delta_color="off")
 m1[2].metric("Load at max deflection F", f"{res['F'] / 1000:.4f} kN")
 m1[3].metric("K4 = F / t_p", f"{res['K4']:,.2f} N/mm")
 m2 = st.columns(3)
@@ -236,8 +238,8 @@ st.subheader("Step-by-step")
 terms = " + ".join(f"{c['1/k']:,.3f}" for c in res["components"])
 a = LOAD_ARM
 st.markdown(f"""
-1. **Max deflection:** H_b = {res['H_b']:g} mm, θ_available = tan⁻¹({inp.t_p:g}/{res['H_b']:g})
-   = **{res['theta_available_rad']:.4f} rad**, D1 max = {a:g} × tan θ = {res['D_max']['D1']:.2f} mm.
+1. **Test stop:** H_b = {res['H_b']:g} mm, θ_available = tan⁻¹({inp.t_p:g}/{res['H_b']:g})
+   = **{res['theta_available_rad']:.4f} rad**.
 2. **Load at max deflection (F):** the load rises in {R['inc']} kN steps until θ reaches
    θ_available. F and K4 depend on each other, so they are solved together:
    F = (θ_available·h²/(2·a) − t_p) / Σ(1/K, without K4) =
@@ -250,6 +252,9 @@ st.markdown(f"""
 6. **Secant stiffness** S_j = S_j,ini / 2 = **{res['S_j'] / 1e6:,.3f} kN·m/rad**
 7. **Check** 0.5·E·I_b / L_b = {res['check_limit'] / 1e6:,.3f} kN·m/rad →
    **{'satisfied' if res['check_ok'] else 'not satisfied'}**
+8. **Max deflection** δ_max = P·a²·(3l − a) / (6·E·I) with P = F, a = {a:g} mm,
+   l = {BEAM_LENGTH:g} mm, I = I_b: {res['F']:,.2f} × {a:g}² × (3 × {BEAM_LENGTH:g} − {a:g}) /
+   (6 × {E:,.0f} × {inp.I_b:g}) = **{res['delta_max']:.4f} mm**
 """)
 
 with st.expander("How the machine finds F: run → note F → K4 = F/t_p → run again"):
@@ -285,7 +290,7 @@ summary = pd.concat([
     comp_df,
     pd.DataFrame([
         {"Component": "θ_available (rad)", "Working": f"{res['theta_available_rad']:.5f}"},
-        {"Component": "D1 at max deflection (mm)", "Working": f"{res['D_max']['D1']:.3f}"},
+        {"Component": "Max deflection δ_max (mm)", "Working": f"{res['delta_max']:.4f}"},
         {"Component": "F — load at max deflection (N)", "Working": f"{res['F']:.3f}"},
         {"Component": "Σ(1/k)", "1/k (1/mm)": round(res["sum_inv_k"], 3)},
         {"Component": "h (mm)", "Working": f"{res['h']:g}"},
