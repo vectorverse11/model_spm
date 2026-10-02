@@ -1,22 +1,27 @@
 """
-CBFEM Stiffness Calculator — Initial & Secant Stiffness (Streamlit)
-===================================================================
+CBFEM Virtual Test — Initial & Secant Stiffness (Streamlit page)
+================================================================
 Hook-connector joint (3-lip): upright + beam + hook connector.
-All dimensions are entered by the user.
+All dimensions are entered by the user. The virtual machine finds the maximum
+deflection, the load F at which it is reached, K4 = F / t_p, the initial and
+secant stiffness, and generates the curves.
 
-Page "Stiffness Calculator" of the app — run with:  streamlit run app.py
+Page "CBFEM Virtual Test" of the app — run with:  streamlit run app.py
 """
 
-from math import atan, degrees
+from math import atan, degrees, tan
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
-from cbfem import E, G, NU, CBFEMInputs, calculate
+from cbfem import E, G, LOAD_ARM, NU, X_D2, X_D3, CBFEMInputs, run
 
-st.title("🏗️ CBFEM — Initial & Secant Stiffness")
-st.caption("Component Based Finite Element Method · Upright + Beam + Hook "
-           "Connector · 3-lip hook connector")
+st.title("🏗️ CBFEM Virtual Test — Initial & Secant Stiffness")
+st.caption("Component Based Finite Element Method · Upright + Beam + Hook Connector · "
+           f"3-lip hook connector · D1 piston @ {LOAD_ARM:g} mm, D2 @ {X_D2:g} mm, "
+           f"D3 @ {X_D3:g} mm")
 
 missing = []
 
@@ -48,7 +53,7 @@ with st.container(border=True):
     f3.metric("ν — Poisson's ratio", f"{NU}")
 
 # ============================================================
-# GEOMETRY
+# GEOMETRY → MAX DEFLECTION
 # ============================================================
 
 st.subheader("📐 Hook Connector & Beam Geometry")
@@ -67,10 +72,13 @@ if H and H_t and beam_depth and t_p:
     hb = H - (H_t + beam_depth)
     if hb > 0:
         th = atan(t_p / hb)
-        st.info(f"**H_b** = H − (H_t + beam depth) = {H:g} − ({H_t:g} + {beam_depth:g}) "
-                f"= **{hb:g} mm**  ·  **θ_available** = tan⁻¹(t_p / H_b) = "
-                f"tan⁻¹({t_p:g}/{hb:g}) = **{degrees(th):.4f}° = {th:.4f} rad**  ·  "
-                f"**δ_bearing** = θ_available × H_b = t_p = **{t_p:g} mm**")
+        st.info(
+            f"**Max deflection (calculated):** H_b = H − (H_t + beam depth) = "
+            f"{H:g} − ({H_t:g} + {beam_depth:g}) = **{hb:g} mm** · "
+            f"θ_available = tan⁻¹(t_p / H_b) = tan⁻¹({t_p:g}/{hb:g}) = "
+            f"**{degrees(th):.4f}° = {th:.4f} rad** · D1 max = {LOAD_ARM:g} × "
+            f"tan θ_available = **{LOAD_ARM * tan(th):.2f} mm** · "
+            f"δ_bearing = θ_available × H_b = t_p = **{t_p:g} mm**")
     else:
         st.error(f"H_b = {H:g} − ({H_t:g} + {beam_depth:g}) = {hb:g} mm. "
                  "It must be greater than 0.")
@@ -104,9 +112,9 @@ with r1[2].container(border=True):
 
 with r2[0].container(border=True):
     st.markdown("**C4 · Hook–upright bearing**  \n`K4 = F / δ_bearing = F / t_p`")
-    F = num("F — max load (N)", "F", fmt="%.1f")
-    st.caption("δ_bearing = θ_available × H_b = t_p (from the geometry above).")
-    show_k("K4", F / t_p if F and t_p else None)
+    st.caption("**Calculated by the virtual machine — no input.** "
+               "φ_avail = t_p / H_b → δ_bearing = φ_avail × H_b = t_p. "
+               "F is the load noted when the test stops at the max deflection.")
 
 with r2[1].container(border=True):
     st.markdown("**C5 · Upright local deformation**  \n`K5 = 3·E·I_u / L_u³`")
@@ -122,11 +130,17 @@ with r2[2].container(border=True):
     show_k("K6", E * b_l * t_l**3 / (4 * L_l**3) if b_l and t_l and L_l else None)
 
 # ============================================================
-# CALCULATE
+# RUN
 # ============================================================
 
 st.divider()
-go = st.button("▶ Calculate Initial & Secant Stiffness", type="primary")
+c_inc, c_btn = st.columns([1, 2])
+increment = c_inc.selectbox("Load increment per step (kN)", [0.01, 0.02],
+                            help="Load starts at 0 kN and increases by this amount "
+                                 "every step until the max deflection is reached.")
+c_btn.write("")
+c_btn.write("")
+go = c_btn.button("▶ Run Virtual Test", type="primary")
 
 if go:
     if missing:
@@ -134,10 +148,11 @@ if go:
         st.warning("Enter all inputs first:\n\n" + "\n".join(f"- {m}" for m in missing))
     else:
         inp = CBFEMInputs(H=H, H_t=H_t, beam_depth=beam_depth, t_p=t_p,
-                          I_b=I_b, L_b=L_b, I_h=I_h, L_h=L_h, A_h=A_h, F=F,
+                          I_b=I_b, L_b=L_b, I_h=I_h, L_h=L_h, A_h=A_h,
                           I_u=I_u, L_u=L_u, b_l=b_l, t_l=t_l, L_l=L_l)
         try:
-            st.session_state["cbfem"] = {"res": calculate(inp), "inp": inp}
+            st.session_state["cbfem"] = {"res": run(inp, increment), "inp": inp,
+                                         "inc": increment}
         except ValueError as exc:
             st.session_state.pop("cbfem", None)
             st.error(str(exc))
@@ -146,16 +161,65 @@ if "cbfem" not in st.session_state:
     st.stop()
 
 R = st.session_state["cbfem"]
-res, inp = R["res"], R["inp"]
+res, inp, rec = R["res"], R["inp"], R["res"]["record"]
+
+# ============================================================
+# RESULTS
+# ============================================================
 
 st.header("📊 Results")
-m = st.columns(3)
-m[0].metric("Initial stiffness S_j,ini", f"{res['S_j_ini'] / 1e6:,.3f} kN·m/rad")
-m[1].metric("Secant stiffness S_j = S_j,ini / 2", f"{res['S_j'] / 1e6:,.3f} kN·m/rad")
-m[2].metric("Check: S_j,ini > 0.5·E·I_b / L_b",
-            "✅ Satisfied" if res["check_ok"] else "❌ Not satisfied",
-            f"limit {res['check_limit'] / 1e6:,.3f} kN·m/rad", delta_color="off")
+st.success(f"⏹ Test stopped at the max deflection θ_available = "
+           f"{res['theta_available_rad']:.4f} rad (D1 = {res['D_max']['D1']:.2f} mm) "
+           f"after {res['steps']} steps. Load noted: **F = {res['F']:,.2f} N "
+           f"({res['F'] / 1000:.4f} kN)**.")
 
+m1 = st.columns(4)
+m1[0].metric("Max deflection θ_available", f"{res['theta_available_rad']:.4f} rad",
+             f"{res['theta_available_deg']:.3f}°", delta_color="off")
+m1[1].metric("D1 at max deflection", f"{res['D_max']['D1']:.2f} mm")
+m1[2].metric("Load at max deflection F", f"{res['F'] / 1000:.4f} kN")
+m1[3].metric("K4 = F / t_p", f"{res['K4']:,.2f} N/mm")
+m2 = st.columns(3)
+m2[0].metric("Initial stiffness S_j,ini", f"{res['S_j_ini'] / 1e6:,.3f} kN·m/rad")
+m2[1].metric("Secant stiffness S_j = S_j,ini / 2", f"{res['S_j'] / 1e6:,.3f} kN·m/rad")
+m2[2].metric("Check: S_j,ini > 0.5·E·I_b / L_b",
+             "✅ Satisfied" if res["check_ok"] else "❌ Not satisfied",
+             f"limit {res['check_limit'] / 1e6:,.3f} kN·m/rad", delta_color="off")
+
+# ---------------- curves ----------------
+P_kN = np.array(rec["P"]) / 1000
+M_kNm = np.array(rec["M"]) / 1e6
+th = np.array(rec["theta"])
+fig, ax = plt.subplots(1, 3, figsize=(17, 5))
+
+ax[0].plot(rec["D1"], P_kN, "g-", lw=2, label=f"D1 piston ({LOAD_ARM:g} mm)")
+ax[0].plot(rec["D3"], P_kN, "r--", lw=1.6, label=f"D3 ({X_D3:g} mm)")
+ax[0].plot(rec["D2"], P_kN, "b-", lw=2, label=f"D2 ({X_D2:g} mm)")
+ax[0].axhline(res["F"] / 1000, color="grey", ls=":", label="F (test stop)")
+ax[0].set(xlabel="Displacement (mm)", ylabel="Load P (kN)",
+          title="Load vs Displacement (all sensors)")
+ax[0].grid(alpha=0.3)
+ax[0].legend(loc="lower right", fontsize=8)
+
+ax[1].plot(th, M_kNm, "r-", lw=2.2, label="Virtual test (θ = (D3 − D2)/100)")
+th_ini = res["M_el"] / res["S_j_ini"]
+ax[1].plot([0, th_ini * 1.15], [0, res["S_j_ini"] * th_ini * 1.15 / 1e6], "k:", lw=1.3,
+           label="Initial stiffness S_j,ini")
+ax[1].plot([0, res["theta_available_rad"]], [0, res["M_max"] / 1e6], "b--", lw=1.3,
+           label="Secant stiffness S_j = S_j,ini/2")
+ax[1].axvline(res["theta_available_rad"], color="grey", ls=":", label="θ_available")
+ax[1].set(xlabel="Rotation θ (rad)", ylabel="Moment M (kN·m)", title="Moment vs Rotation")
+ax[1].grid(alpha=0.3)
+ax[1].legend(loc="lower right", fontsize=8)
+
+ax[2].plot(rec["step"], P_kN, "m-", lw=2)
+ax[2].set(xlabel="Step number", ylabel="Load P (kN)",
+          title=f"Load vs Step (increment = {R['inc']} kN)")
+ax[2].grid(alpha=0.3)
+plt.tight_layout()
+st.pyplot(fig)
+
+# ---------------- component table ----------------
 st.subheader("Component stiffness")
 comp_df = pd.DataFrame([{
     "Component": f"{c['C']} {c['Component']}",
@@ -167,30 +231,62 @@ comp_df = pd.DataFrame([{
 } for c in res["components"]])
 st.dataframe(comp_df, hide_index=True, width="stretch")
 
+# ---------------- step by step ----------------
 st.subheader("Step-by-step")
 terms = " + ".join(f"{c['1/k']:,.3f}" for c in res["components"])
+a = LOAD_ARM
 st.markdown(f"""
-1. **Stiffness coefficients** (EN 1993-1-8 §6.3.1): k_i = K_i / E, in mm.
-2. **Σ(1/k_i)** = {terms} = **{res['sum_inv_k']:,.3f} mm⁻¹**
-3. **Lever arm** h = total hook connector height = **{res['h']:g} mm**
-4. **Initial stiffness**
-   S_j,ini = E·h² / Σ(1/k_i) = {E:,.0f} × {res['h']:g}² / {res['sum_inv_k']:,.3f}
-   = **{res['S_j_ini']:,.0f} N·mm/rad = {res['S_j_ini'] / 1e6:,.3f} kN·m/rad**
-5. **Secant stiffness**
-   S_j = S_j,ini / 2 = **{res['S_j'] / 1e6:,.3f} kN·m/rad**
-6. **Check**
-   0.5·E·I_b / L_b = 0.5 × {E:,.0f} × {inp.I_b:g} / {inp.L_b:g}
-   = {res['check_limit'] / 1e6:,.3f} kN·m/rad → S_j,ini {'>' if res['check_ok'] else '≤'} limit:
+1. **Max deflection:** H_b = {res['H_b']:g} mm, θ_available = tan⁻¹({inp.t_p:g}/{res['H_b']:g})
+   = **{res['theta_available_rad']:.4f} rad**, D1 max = {a:g} × tan θ = {res['D_max']['D1']:.2f} mm.
+2. **Load at max deflection (F):** the load rises in {R['inc']} kN steps until θ reaches
+   θ_available. F and K4 depend on each other, so they are solved together:
+   F = (θ_available·h²/(2·a) − t_p) / Σ(1/K, without K4) =
+   ({res['theta_available_rad']:.4f} × {res['h']:g}² / (2 × {a:g}) − {inp.t_p:g}) /
+   {res['R_without_K4']:.6f} = **{res['F']:,.2f} N**
+3. **K4 = F / δ_bearing = F / t_p** = {res['F']:,.2f} / {inp.t_p:g} = **{res['K4']:,.2f} N/mm**
+4. **Σ(1/k_i)** with k_i = K_i / E: {terms} = **{res['sum_inv_k']:,.3f} mm⁻¹**
+5. **Initial stiffness** S_j,ini = E·h² / Σ(1/k_i) = {E:,.0f} × {res['h']:g}² /
+   {res['sum_inv_k']:,.3f} = **{res['S_j_ini'] / 1e6:,.3f} kN·m/rad**
+6. **Secant stiffness** S_j = S_j,ini / 2 = **{res['S_j'] / 1e6:,.3f} kN·m/rad**
+7. **Check** 0.5·E·I_b / L_b = {res['check_limit'] / 1e6:,.3f} kN·m/rad →
    **{'satisfied' if res['check_ok'] else 'not satisfied'}**
 """)
-st.caption(
-    f"Also: H_b = {res['H_b']:g} mm · θ_available = {res['theta_available_deg']:.4f}° "
-    f"= {res['theta_available_rad']:.4f} rad · δ_bearing = t_p = {res['delta_bearing']:g} mm. "
-    "Because K_i already contains E, E·h²/Σ(1/k_i) with k_i = K_i/E equals h²/Σ(1/K_i).")
+
+with st.expander("How the machine finds F: run → note F → K4 = F/t_p → run again"):
+    st.caption("Run 1 starts without K4 (bearing taken as rigid). Each run stops at "
+               "θ_available; the load noted there updates K4 for the next run, until "
+               "F no longer changes. The result equals the closed form in step 2.")
+    st.dataframe(pd.DataFrame(res["iterations"]).round(4), hide_index=True,
+                 width="stretch")
+
+with st.expander("How the curve is built"):
+    st.markdown(f"""
+* Moment at the connector: M = P × {a:g} mm. The test stops at M_max = F × {a:g} =
+  {res['M_max'] / 1e6:.4f} kN·m.
+* Up to ⅔·M_max (the EN 1993-1-8 elastic limit) the slope is **S_j,ini**.
+* From there the curve goes straight to the stop point (θ_available, M_max), so the
+  line from the origin to the stop point has the slope **S_j = S_j,ini / 2**.
+* Sensors: D(x) = x · tan θ at D1 = {a:g}, D2 = {X_D2:g} and D3 = {X_D3:g} mm.
+  The beam (K1) is already inside S_j,ini, so it is not added again.
+""")
+
+# ---------------- CSVs ----------------
+st.subheader("📡 Sensor Data")
+sensor_df = pd.DataFrame({
+    "Load (kN)": np.round(P_kN, 4),
+    "D1 piston (mm)": np.round(rec["D1"], 3),
+    "D2 (mm)": np.round(rec["D2"], 3),
+    "D3 (mm)": np.round(rec["D3"], 3),
+})
+with st.expander("🔍 View sensor data", expanded=False):
+    st.dataframe(sensor_df, hide_index=True, width="stretch", height=320)
 
 summary = pd.concat([
     comp_df,
     pd.DataFrame([
+        {"Component": "θ_available (rad)", "Working": f"{res['theta_available_rad']:.5f}"},
+        {"Component": "D1 at max deflection (mm)", "Working": f"{res['D_max']['D1']:.3f}"},
+        {"Component": "F — load at max deflection (N)", "Working": f"{res['F']:.3f}"},
         {"Component": "Σ(1/k)", "1/k (1/mm)": round(res["sum_inv_k"], 3)},
         {"Component": "h (mm)", "Working": f"{res['h']:g}"},
         {"Component": "S_j,ini (kN·m/rad)", "Working": f"{res['S_j_ini'] / 1e6:.4f}"},
@@ -200,5 +296,9 @@ summary = pd.concat([
         {"Component": "Check satisfied", "Working": str(res["check_ok"])},
     ]),
 ])
-st.download_button("📥 Download results (CSV)", summary.to_csv(index=False).encode("utf-8"),
-                   "cbfem_stiffness_results.csv", "text/csv")
+d1, d2 = st.columns(2)
+d1.download_button("📥 Download sensor readings (CSV)",
+                   sensor_df.to_csv(index=False).encode("utf-8"),
+                   "cbfem_sensor_readings.csv", "text/csv", width="stretch")
+d2.download_button("📥 Download results (CSV)", summary.to_csv(index=False).encode("utf-8"),
+                   "cbfem_results.csv", "text/csv", width="stretch")
