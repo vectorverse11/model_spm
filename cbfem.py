@@ -3,47 +3,39 @@ CBFEM Virtual Test — hook-connector joint (3-lip)
 =================================================
 
 Component-based method for the assembly UPRIGHT + BEAM + HOOK CONNECTOR.
-Every dimension is entered by the user. The virtual machine itself finds the
-maximum deflection, the load at which it is reached (F), and from F the
-bearing stiffness K4, then generates the curves.
+Every dimension is entered by the user.
 
 Fixed values (steel): E = 210000 N/mm^2, G = 80769 N/mm^2, nu = 0.3
+Rig: a = 400 mm (load point / D1 piston), l = 500 mm (beam length),
+     sensors D2 = 40 mm, D3 = 140 mm from the upright face.
 
-1. Stop condition and maximum deflection
-       H_b             = H - (H_t + beam depth)
-       theta_available = tan^-1(t_p / H_b)            (rad)  -> test stops here
-       delta_max       = P a^2 (3 l - a) / (6 E I_b)  at the stop load P = F
-                         (a = 400 mm, l = 500 mm, I_b = beam inertia, x-axis)
+1. Max deflection (stop condition)
+       delta_max = P a^2 (3 l - a) / (6 E I_b)     P = MAX load (3.86 kN), not
+                                                   the step load
+   The load rises from 0 kN in steps of 0.01 / 0.02 kN; when the D1 piston
+   reading reaches delta_max the test stops and the load is noted as F.
 
 2. Component stiffnesses (N/mm)
        K1 = 3 E I_b / L_b^3        beam local deformation
        K2 = 3 E I_h / L_h^3        hook bending
        K3 = G A_h / L_h            hook shear
-       K4 = F / delta_bearing      hook-upright bearing, delta_bearing = t_p
+       K4 = F / delta_bearing      hook-upright bearing
+            phi_avail = t_p / H_b,  H_b = H - (H_t + beam depth)
+            delta_bearing = phi_avail * H_b = t_p   ->  K4 = F / t_p
        K5 = 3 E I_u / L_u^3        upright local deformation
        K6 = E b_l t_l^3 / (4 L_l^3) upright lip deformation
 
-3. Joint stiffness (EN 1993-1-8 6.3.1), all six components
-       S_j,ini = E h^2 / sum(1/k_i),  k_i = K_i / E   (= h^2 / sum(1/K_i))
+3. Joint stiffness (as given in the CBFEM formula sheet)
+       S_j,ini = E h^2 / (1/K1 + 1/K2 + 1/K3 + 1/K4 + 1/K5 + 1/K6)
        S_j     = S_j,ini / 2          secant stiffness
        h = total hook-connector height
+       Check:  S_j,ini > 0.5 E I_b / L_b
 
-4. Moment-rotation curve used by the virtual machine (M = P a)
-       slope S_j,ini            up to M = 2/3 M_max      (EN 1993-1-8 6.3.1(4))
-       then straight to the stop point (theta_available, M_max), so that the
-       secant from the origin to the stop point is exactly S_j = S_j,ini / 2:
-       theta_available = M_max / S_j = 2 M_max / S_j,ini
-
-5. F and K4 depend on each other (K4 = F / t_p and F is the load at the stop
-   point, which depends on K4). With R = sum over i != 4 of 1/K_i:
-       theta_available = 2 F a (R + t_p / F) / h^2
-   =>  F = (theta_available h^2 / (2 a) - t_p) / R        (closed form)
-   The same F is reached by repeating the test: run -> note F -> K4 = F/t_p
-   -> run again, which the engine also reports step by step.
-
-6. Virtual test: load from 0 kN in steps of 0.01 / 0.02 kN; at each step
-   theta from the curve, sensors D(x) = x tan(theta) at D1 = a = 400 mm,
-   D2 = 40 mm, D3 = 140 mm; the test stops when theta reaches theta_available.
+4. Curves (M = P a)
+       M-theta: slope S_j,ini up to 2/3 M_max (EN 1993-1-8 6.3.1(4)), then
+       straight to the stop point so that the secant there is S_j = S_j,ini/2.
+       Sensors: D(x) = P x^2 (3a - x) / (6 E I_b) + x tan(theta)
+       at D1 = 400 mm, D2 = 40 mm, D3 = 140 mm.
 """
 
 from dataclasses import dataclass
@@ -60,6 +52,7 @@ LOAD_ARM = 400.0                # a: D1 piston / load point, mm from upright fac
 BEAM_LENGTH = 500.0             # l: beam length, mm
 X_D2 = 40.0
 X_D3 = 140.0
+P_MAX_KN = 3.86                 # P used for delta_max (kN)
 
 
 @dataclass
@@ -83,11 +76,12 @@ class CBFEMInputs:
     b_l: float          # effective lip width, mm
     t_l: float          # lip thickness, mm
     L_l: float          # effective lip length, mm
+    # Max deflection
+    P_max_kN: float = P_MAX_KN   # load P used in delta_max, kN
 
 
-def delta_max(P: float, I_b: float) -> float:
-    """Max deflection of the beam (cantilever, load P at a, length l):
-    delta_max = P a^2 (3 l - a) / (6 E I_b)."""
+def deflection(P: float, I_b: float) -> float:
+    """delta = P a^2 (3 l - a) / (6 E I_b)   (P in N, result in mm)."""
     a, l = LOAD_ARM, BEAM_LENGTH
     return P * a**2 * (3.0 * l - a) / (6.0 * E * I_b)
 
@@ -96,12 +90,8 @@ def H_b(inp: CBFEMInputs) -> float:
     return inp.H - (inp.H_t + inp.beam_depth)
 
 
-def theta_available(inp: CBFEMInputs) -> float:
-    return atan(inp.t_p / H_b(inp))
-
-
-def fixed_components(inp: CBFEMInputs) -> List[Dict]:
-    """C1, C2, C3, C5, C6 — they do not depend on the test result."""
+def components(inp: CBFEMInputs, F: float) -> List[Dict]:
+    """K1 ... K6 in N/mm; K4 uses the load F noted at the stop."""
     return [
         {"C": "C1", "Component": "Beam local deformation",
          "Formula": "K1 = 3·E·I_b / L_b³",
@@ -115,6 +105,10 @@ def fixed_components(inp: CBFEMInputs) -> List[Dict]:
          "Formula": "K3 = G·A_h / L_h",
          "Working": f"{G:.0f} × {inp.A_h:g} / {inp.L_h:g}",
          "K": G * inp.A_h / inp.L_h},
+        {"C": "C4", "Component": "Hook–upright bearing",
+         "Formula": "K4 = F / δ_bearing = F / t_p",
+         "Working": f"{F:,.2f} / {inp.t_p:g}",
+         "K": F / inp.t_p},
         {"C": "C5", "Component": "Upright local deformation",
          "Formula": "K5 = 3·E·I_u / L_u³",
          "Working": f"3 × {E:.0f} × {inp.I_u:g} / {inp.L_u:g}³",
@@ -126,14 +120,9 @@ def fixed_components(inp: CBFEMInputs) -> List[Dict]:
     ]
 
 
-def S_j_ini_for(R: float, t_p: float, F: float, h: float) -> float:
-    """S_j,ini (N mm/rad) for a given stop load F: h^2 / (R + 1/K4)."""
-    return h**2 / (R + t_p / F)
-
-
 def theta_of_M(M: float, S_ini: float, M_max: float) -> float:
-    """Bilinear M-theta: S_j,ini up to 2/3 M_max, then to (theta_av, M_max)
-    with secant S_j,ini / 2 at the stop point."""
+    """S_j,ini up to 2/3 M_max, then straight to the stop point where the
+    secant stiffness is S_j = S_j,ini / 2."""
     M_el = 2.0 / 3.0 * M_max
     if M <= M_el:
         return M / S_ini
@@ -142,95 +131,96 @@ def theta_of_M(M: float, S_ini: float, M_max: float) -> float:
     return th_el + (M - M_el) * (th_max - th_el) / (M_max - M_el)
 
 
+def D_at(x: float, P: float, theta: float, I_b: float) -> float:
+    """Sensor reading at x: beam bending under P (load at a) + connection rotation."""
+    a = LOAD_ARM
+    return P * x**2 * (3.0 * a - x) / (6.0 * E * I_b) + x * tan(theta)
+
+
 def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
     hb = H_b(inp)
     if hb <= 0:
         raise ValueError(
             f"H_b = H − (H_t + beam depth) = {inp.H:g} − ({inp.H_t:g} + "
             f"{inp.beam_depth:g}) = {hb:g} mm must be greater than 0.")
-    th_av = theta_available(inp)
-    h, a, t_p = inp.H, LOAD_ARM, inp.t_p
+    a, h, t_p, I_b = LOAD_ARM, inp.H, inp.t_p, inp.I_b
+    phi_avail = t_p / hb                              # rad (as in the notes)
 
-    fixed = fixed_components(inp)
-    R = sum(1.0 / c["K"] for c in fixed)            # mm/N, all except K4
-    A = th_av * h**2 / (ETA * a)                    # mm
+    # ---- 1. max deflection from the MAX load P (not the step load) ----
+    P_max = inp.P_max_kN * 1000.0                     # N
+    d_max = deflection(P_max, I_b)                    # mm
 
-    if A <= t_p:
+    # ---- 2. load F at which D1 reaches d_max ----
+    # K4 = F / t_p, so S_j,ini depends on F; at the stop point the secant is
+    # S_j = S_j,ini / 2, i.e. theta_stop = 2 F a / S_j,ini(F).
+    others = components(inp, 1.0)                     # K4 placeholder, removed below
+    R = sum(1.0 / c["K"] for c in others if c["C"] != "C4")
+
+    def S_of(F):
+        return E * h**2 / (R + t_p / F)
+
+    def D1_stop(F):
+        return D_at(a, F, 2.0 * F * a / S_of(F), I_b)
+
+    lo, hi = 0.0, max(P_max, 1.0)
+    if D1_stop(1e-9) >= d_max:
         raise ValueError(
-            "The joint cannot reach θ_available: θ_available·h²/(2·a) = "
-            f"{A:.4g} mm is not greater than t_p = {t_p:g} mm, so no positive "
-            "load F satisfies K4 = F / t_p at the stop point. Check H, H_t, "
-            "beam depth and t_p.")
+            f"δ_max = {d_max:.4g} mm is reached before any load is applied — "
+            "check P, I_b and the component inputs.")
+    while D1_stop(hi) < d_max:
+        hi *= 2.0
+    for _ in range(200):                              # bisection: D1 rises with F
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if D1_stop(mid) < d_max else (lo, mid)
+    F = hi
 
-    # ---- F and K4: closed form, plus the run → note F → update K4 loop ----
-    F = (A - t_p) / R
-    # Run 1: K4 not known yet, bearing taken as rigid (K4 -> infinity)
-    F_n = A / R
-    iterations = [{"Run": 1, "F used for K4 (N)": None,
-                   "K4 = F / t_p (N/mm)": None,
-                   "S_j,ini (kN·m/rad)": h**2 / R / 1e6,
-                   "Test stops at F (N)": F_n}]
-    for n in range(2, 201):
-        K4_n = F_n / t_p
-        S_n = S_j_ini_for(R, t_p, F_n, h)
-        F_next = th_av * S_n / (ETA * a)            # load at which this run stops
-        iterations.append({"Run": n, "F used for K4 (N)": F_n,
-                           "K4 = F / t_p (N/mm)": K4_n,
-                           "S_j,ini (kN·m/rad)": S_n / 1e6,
-                           "Test stops at F (N)": F_next})
-        if abs(F_next - F_n) <= 1e-6 * F:
-            break
-        F_n = F_next
-
-    K4 = F / t_p
-    comps = fixed[:3] + [{
-        "C": "C4", "Component": "Hook–upright bearing",
-        "Formula": "K4 = F / δ_bearing,  δ_bearing = θ_available·H_b = t_p",
-        "Working": f"{F:,.2f} / {t_p:g}", "K": K4}] + fixed[3:]
+    # ---- 3. components (K4 from the noted load F) and joint stiffness ----
+    comps = components(inp, F)
     for c in comps:
-        c["k = K/E"] = c["K"] / E
-        c["1/k"] = 1.0 / c["k = K/E"]
-    sum_inv_k = sum(c["1/k"] for c in comps)
-    S_ini = E * h**2 / sum_inv_k                     # N mm/rad
+        c["1/K"] = 1.0 / c["K"]
+    sum_inv_K = sum(c["1/K"] for c in comps)          # mm/N
+    K_total = 1.0 / sum_inv_K                         # N/mm
+    S_ini = E * h**2 / sum_inv_K
     S_j = S_ini / ETA
-    M_max = F * a
-    limit = 0.5 * E * inp.I_b / inp.L_b
+    limit = 0.5 * E * I_b / inp.L_b
 
-    # ---- virtual test: load steps from 0 until theta_available ----
+    # ---- 4. virtual test: load steps from 0 until D1 = delta_max ----
+    M_max = F * a
     inc = increment_kN * 1000.0
 
     def state(P):
         th = theta_of_M(P * a, S_ini, M_max)
         return {"P": P, "M": P * a, "theta": th,
-                "D1": a * tan(th), "D2": X_D2 * tan(th), "D3": X_D3 * tan(th)}
+                "D1": D_at(a, P, th, I_b), "D2": D_at(X_D2, P, th, I_b),
+                "D3": D_at(X_D3, P, th, I_b)}
 
     rows: List[Dict] = []
     P = 0.0
     while P < F:
         rows.append(state(P))
         P += inc
-    rows.append(state(F))                            # stop point, exactly at theta_av
+    rows.append(state(F))                             # stop: D1 = delta_max
 
     rec = {k: [r[k] for r in rows] for k in ("P", "M", "theta", "D1", "D2", "D3")}
     rec["step"] = list(range(len(rows)))
-    rec["theta_meas"] = [atan((r["D3"] - r["D2"]) / (X_D3 - X_D2)) for r in rows]
 
     return {
         "components": comps,
         "H_b": hb,
-        "theta_available_rad": th_av,
-        "theta_available_deg": degrees(th_av),
-        "delta_max": delta_max(F, inp.I_b),          # mm, at the stop load F
+        "phi_avail": phi_avail,
+        "theta_available_rad": atan(phi_avail),
+        "theta_available_deg": degrees(atan(phi_avail)),
         "delta_bearing": t_p,
-        "h": h,
-        "R_without_K4": R,
+        "P_max": P_max,
+        "delta_max": d_max,
         "F": F,
-        "K4": K4,
-        "M_max": M_max,
-        "iterations": iterations,
-        "sum_inv_k": sum_inv_k,
+        "K4": F / t_p,
+        "h": h,
+        "sum_inv_K": sum_inv_K,
+        "K_total": K_total,
         "S_j_ini": S_ini,
         "S_j": S_j,
+        "M_max": M_max,
         "M_el": 2.0 / 3.0 * M_max,
         "check_limit": limit,
         "check_ok": S_ini > limit,
