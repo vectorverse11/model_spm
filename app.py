@@ -1,17 +1,16 @@
 """
-Virtual SPM — entry point.  Run with:  streamlit run app.py
+Virtual SPM — CBFEM Virtual Test.  Run with:  streamlit run app.py
 
-Pages:
-  1. CBFEM Virtual Test — max deflection, F, K4, initial & secant stiffness,
-                           curves and CSV (stiffness_page.py, cbfem.py)
-  2. Earlier model      — previous virtual test model (virtual_test_page.py)
+The virtual machine calculates the max deflection, the load F at which it is
+reached, K4 = F / t_p, the initial and secant stiffness, and the curves
+(stiffness_page.py, cbfem.py).
 """
 
 import streamlit as st
 
-st.set_page_config(page_title="Virtual SPM", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="Virtual SPM — CBFEM Virtual Test", page_icon="🏗️",
+                   layout="wide")
 
 st.navigation([
     st.Page("stiffness_page.py", title="CBFEM Virtual Test", icon="📐", default=True),
-    st.Page("virtual_test_page.py", title="Earlier model", icon="🧪"),
-]).run()
+], position="hidden").run()
