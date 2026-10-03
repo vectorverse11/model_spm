@@ -13,7 +13,7 @@ Rig: a = 400 mm (load point / D1 piston), l = 500 mm (beam length),
 1. Max deflection (stop condition)
        delta_max = P a^2 (3 l - a) / (6 E I_b)     P = MAX load (user input),
                                                    not the step load
-   The load rises from 0 kN in steps of 0.01 / 0.02 kN; when the D1 piston
+   The load rises from 0 kN in steps of the user-entered increment; when the D1 piston
    reading reaches delta_max the test stops and the load is noted as F.
 
 2. Component stiffnesses (N/mm)
@@ -187,6 +187,9 @@ def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
     # ---- 4. virtual test: load steps from 0 until D1 = delta_max ----
     M_max = F * a
     inc = increment_kN * 1000.0
+    if inc <= 0 or F / inc > 200_000:
+        raise ValueError(f"Load increment {increment_kN:g} kN gives too many steps "
+                         f"(F = {F / 1000:.3f} kN) — use a larger increment.")
 
     def state(P):
         th = theta_of_M(P * a, S_ini, M_max)

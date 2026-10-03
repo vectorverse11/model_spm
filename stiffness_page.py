@@ -51,9 +51,10 @@ def num(label, key, fmt="%.2f", help=None, container=st):
     return v
 
 
-def show_k(name, value):
+def show_k(name, working, value):
+    """Live value with its working, e.g. K1 = 3 × 210,000 × I_b / L_b³ = **… N/mm**."""
     if value is not None:
-        st.markdown(f"**{name} = {value:,.2f} N/mm**")
+        st.markdown(f"{name} = {working} = **{value:,.2f} N/mm**")
 
 
 def dim_box(values: dict):
@@ -201,20 +202,23 @@ with r1[0].container(border=True):
     I_b = num("I_b — moment of inertia of beam, x-axis (mm⁴)", "I_b", fmt="%.1f",
               help="Also used in δ_max = P·a²(3l − a)/(6·E·I).")
     L_b = num("L_b — beam length (mm)", "L_b")
-    show_k("K1", 3 * E * I_b / L_b**3 if I_b and L_b else None)
+    show_k("K1", f"3 × {E:,.0f} × {I_b:g} / {L_b:g}³" if I_b and L_b else "",
+           3 * E * I_b / L_b**3 if I_b and L_b else None)
 
 with r1[1].container(border=True):
     st.markdown("**C2 · Hook bending**  \n`K2 = 3·E·I_h / L_h³`")
     I_h = num("I_h — moment of inertia of hook connector (mm⁴)", "I_h", fmt="%.2f")
     L_h = num("L_h — effective hook bending / deformation length (mm)", "L_h",
               help="Used by C2 and C3.")
-    show_k("K2", 3 * E * I_h / L_h**3 if I_h and L_h else None)
+    show_k("K2", f"3 × {E:,.0f} × {I_h:g} / {L_h:g}³" if I_h and L_h else "",
+           3 * E * I_h / L_h**3 if I_h and L_h else None)
 
 with r1[2].container(border=True):
     st.markdown("**C3 · Hook shear**  \n`K3 = G·A_h / L_h`")
     A_h = num("A_h — effective hook shear area (mm²)", "A_h")
     st.caption("L_h is taken from C2.")
-    show_k("K3", G * A_h / L_h if A_h and L_h else None)
+    show_k("K3", f"{G:,.0f} × {A_h:g} / {L_h:g}" if A_h and L_h else "",
+           G * A_h / L_h if A_h and L_h else None)
 
 with r2[0].container(border=True):
     st.markdown("**C4 · Hook–upright bearing**  \n`K4 = F / δ_bearing = F / t_p`")
@@ -226,14 +230,16 @@ with r2[1].container(border=True):
     st.markdown("**C5 · Upright local deformation**  \n`K5 = 3·E·I_u / L_u³`")
     I_u = num("I_u — moment of inertia of upright, x-axis (mm⁴)", "I_u", fmt="%.1f")
     L_u = num("L_u — effective length of deforming upright portion (mm)", "L_u")
-    show_k("K5", 3 * E * I_u / L_u**3 if I_u and L_u else None)
+    show_k("K5", f"3 × {E:,.0f} × {I_u:g} / {L_u:g}³" if I_u and L_u else "",
+           3 * E * I_u / L_u**3 if I_u and L_u else None)
 
 with r2[2].container(border=True):
     st.markdown("**C6 · Upright lip deformation**  \n`K6 = E·b_l·t_l³ / (4·L_l³)`")
     b_l = num("b_l — effective width of lip (mm)", "b_l")
     t_l = num("t_l — lip thickness (mm)", "t_l")
     L_l = num("L_l — effective lip length (mm)", "L_l")
-    show_k("K6", E * b_l * t_l**3 / (4 * L_l**3) if b_l and t_l and L_l else None)
+    show_k("K6", f"{E:,.0f} × {b_l:g} × {t_l:g}³ / (4 × {L_l:g}³)" if b_l and t_l and L_l
+           else "", E * b_l * t_l**3 / (4 * L_l**3) if b_l and t_l and L_l else None)
 
 # ============================================================
 # 5. MAX DEFLECTION + RUN
@@ -255,9 +261,10 @@ with st.container(border=True):
 
 st.divider()
 c_inc, c_btn = st.columns([1, 2])
-increment = c_inc.selectbox("Load increment per step (kN)", [0.01, 0.02],
-                            help="Load starts at 0 kN and increases by this amount "
-                                 "every step until the max deflection is reached.")
+with c_inc:
+    increment = num("Load increment per step (kN)", "increment", fmt="%.3f",
+                    help="Load starts at 0 kN and increases by this amount "
+                         "every step until the max deflection is reached.")
 c_btn.write("")
 c_btn.write("")
 go = c_btn.button("▶ Run Virtual Test", type="primary")
@@ -304,12 +311,28 @@ m1[0].metric("Max deflection δ_max", f"{res['delta_max']:.4f} mm",
 m1[1].metric("Load at max deflection F", f"{res['F'] / 1000:.3f} kN")
 m1[2].metric("Moment M = F × a", f"{res['M_max'] / 1e6:.4f} kN·m")
 m1[3].metric("K4 = F / t_p", f"{res['K4']:,.2f} N/mm")
+m1[0].caption(f"δ_max = {res['P_max']:,.0f} × {a:g}² × (3 × {BEAM_LENGTH:g} − {a:g}) / "
+              f"(6 × {E:,.0f} × {inp.I_b:g}) = **{res['delta_max']:.4f} mm**")
+m1[1].caption(f"F = load at which D1 = δ_max = {res['delta_max']:.4f} mm → "
+              f"**{res['F']:,.2f} N = {res['F'] / 1000:.3f} kN**")
+m1[2].caption(f"M = F × a = {res['F']:,.2f} × {a:g} = {res['M_max']:,.0f} N·mm = "
+              f"**{res['M_max'] / 1e6:.4f} kN·m**")
+m1[3].caption(f"K4 = F / t_p = {res['F']:,.2f} / {inp.t_p:g} = **{res['K4']:,.2f} N/mm**")
 m2 = st.columns(3)
 m2[0].metric("Initial stiffness S_j,ini", f"{res['S_j_ini'] / 1e6:,.3f} kN·m/rad")
 m2[1].metric("Secant stiffness S_j = S_j,ini / 2", f"{res['S_j'] / 1e6:,.3f} kN·m/rad")
 m2[2].metric("Check: S_j,ini > 0.5·E·I_b / L_b",
              "✅ Satisfied" if res["check_ok"] else "❌ Not satisfied",
              f"limit {res['check_limit'] / 1e6:,.3f} kN·m/rad", delta_color="off")
+m2[0].caption(f"S_j,ini = E × h² / (1/K1 + … + 1/K6) = {E:,.0f} × {res['h']:g}² / "
+              f"{res['sum_inv_K']:.6g} = {res['S_j_ini']:,.6g} N·mm/rad = "
+              f"**{res['S_j_ini'] / 1e6:,.3f} kN·m/rad**")
+m2[1].caption(f"S_j = S_j,ini / 2 = {res['S_j_ini'] / 1e6:,.3f} / 2 = "
+              f"**{res['S_j'] / 1e6:,.3f} kN·m/rad**")
+m2[2].caption(f"0.5 × E × I_b / L_b = 0.5 × {E:,.0f} × {inp.I_b:g} / {inp.L_b:g} = "
+              f"{res['check_limit']:,.0f} N·mm/rad = **{res['check_limit'] / 1e6:,.3f} "
+              f"kN·m/rad** → {res['S_j_ini'] / 1e6:,.3f} "
+              f"{'>' if res['check_ok'] else '≤'} {res['check_limit'] / 1e6:,.3f}")
 
 # ---------------- curves ----------------
 P_kN = np.array(rec["P"]) / 1000
