@@ -43,7 +43,7 @@ Fixed values: E = 210000 N/mm², G = 80769 N/mm², ν = 0.3. Rig: a = 400 mm (lo
 * Geometry for CBFEM, all entered by the user: H (= h), t_p, beam depth and H_t
 * Component properties: I_b, L_b, I_h, L_h, A_h, I_u, L_u, b_l, t_l, L_l
 * **P, the max load (kN)**. It is used only for δ_max.
-* Load increment: 0.01 or 0.02 kN
+* Load increment per step (kN), entered by the user
 
 **Calculated by the virtual machine:** δ_max, the stop load F, the moment M = F × a, K4, S_j,ini and S_j.
 
