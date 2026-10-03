@@ -158,18 +158,22 @@ with m_chem:
 st.info(f"**Fixed values (steel):** E = {E:,.0f} N/mm² · G = {G:,.0f} N/mm² · ν = {NU}")
 
 # ============================================================
-# 3. GEOMETRY (from the cards) + H_t
+# 3. GEOMETRY — entered by the user
 # ============================================================
 
 st.divider()
 st.subheader("📐 Hook Connector & Beam Geometry")
-H = con.get("H")
-t_p = con.get("T")
-beam_depth = bm.get("H")
+def card_hint(value):
+    return f"Card value: {value:g} mm" if value else None
+
+
 g = st.columns(4)
-g[0].metric("H — hook connector height (= h)", f"{H:g} mm" if H else "—")
-g[1].metric("t_p — connector thickness (T)", f"{t_p:g} mm" if t_p else "—")
-g[2].metric("Beam depth (beam H)", f"{beam_depth:g} mm" if beam_depth else "—")
+with g[0]:
+    H = num("H — hook connector height, = h (mm)", "geo_H", help=card_hint(con.get("H")))
+with g[1]:
+    t_p = num("t_p — connector thickness (mm)", "geo_tp", help=card_hint(con.get("T")))
+with g[2]:
+    beam_depth = num("Beam depth (mm)", "geo_bd", help=card_hint(bm.get("H")))
 with g[3]:
     H_t = num("H_t — connector above beam top (mm)", "H_t")
 
