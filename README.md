@@ -40,10 +40,7 @@ Fixed values: E = 210000 N/mm², G = 80769 N/mm², ν = 0.3. Rig: a = 400 mm (lo
   * Beam: H, W, T, type
   * Hook connector: no. of lips, H, D, W, T
 * Material: IS 2062 : 2011 grade and quality, with the mechanical and chemical tables shown
-* Geometry for CBFEM:
-  * H (= h) and t_p come from the connector card (H and T)
-  * Beam depth comes from the beam card (H)
-  * H_t is entered
+* Geometry for CBFEM, all entered by the user: H (= h), t_p, beam depth and H_t
 * Component properties: I_b, L_b, I_h, L_h, A_h, I_u, L_u, b_l, t_l, L_l
 * **P, the max load (kN)**. It is used only for δ_max.
 * Load increment: 0.01 or 0.02 kN
