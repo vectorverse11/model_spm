@@ -10,11 +10,10 @@ Fixed values (steel): E = 210000 N/mm^2, G = 80769 N/mm^2, nu = 0.3
 Rig: a = 400 mm (load point / D1 piston), l = 500 mm (beam length),
      sensors D2 = 40 mm, D3 = 140 mm from the upright face.
 
-1. Max deflection (stop condition)
-       delta_max = P a^2 (3 l - a) / (6 E I_b)     P = MAX load (user input),
-                                                   not the step load
-   The load rises from 0 kN in steps of the user-entered increment; when the D1 piston
-   reading reaches delta_max the test stops and that load is noted (P_stop).
+1. Test stop and max deflection
+   The load rises from 0 kN in steps of the user-entered increment and the test
+   stops when the load reaches the MAX load P (user input).
+       delta_max = P a^2 (3 l - a) / (6 E I_b)     beam deflection at the max load
 
 2. Component stiffnesses (K1-K3, K5, K6 in N/mm; K4 in kN/rad)
        K1 = 3 E I_b / L_b^3        beam local deformation
@@ -171,20 +170,10 @@ def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
     S_j = S_ini / ETA
     limit = 0.5 * E * I_b / inp.L_b
 
-    # ---- 3. load P_stop at which D1 reaches d_max ----
-    # At the stop point the secant is S_j = S_j,ini / 2: theta_stop = 2 P a / S_j,ini.
-    def D1_stop(P):
-        return D_at(a, P, 2.0 * P * a / S_ini, I_b)
+    # ---- 3. the test stops at the max load ----
+    F = P_max                                         # P_stop
 
-    lo, hi = 0.0, max(P_max, 1.0)
-    while D1_stop(hi) < d_max:
-        hi *= 2.0
-    for _ in range(200):                              # bisection: D1 rises with P
-        mid = 0.5 * (lo + hi)
-        lo, hi = (mid, hi) if D1_stop(mid) < d_max else (lo, mid)
-    F = hi                                            # P_stop
-
-    # ---- 4. virtual test: load steps from 0 until D1 = delta_max ----
+    # ---- 4. virtual test: load steps from 0 up to the max load ----
     M_max = F * a
     inc = increment_kN * 1000.0
     if inc <= 0 or F / inc > 200_000:
@@ -198,11 +187,11 @@ def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
                 "D3": D_at(X_D3, P, th, I_b)}
 
     rows: List[Dict] = []
-    P = 0.0
-    while P < F:
-        rows.append(state(P))
-        P += inc
-    rows.append(state(F))                             # stop: D1 = delta_max
+    i = 0
+    while i * inc < F - 1e-9:                         # 0, inc, 2·inc, … below the max load
+        rows.append(state(i * inc))
+        i += 1
+    rows.append(state(F))                             # stop: P = max load
 
     rec = {k: [r[k] for r in rows] for k in ("P", "M", "theta", "D1", "D2", "D3")}
     rec["step"] = list(range(len(rows)))
@@ -214,7 +203,7 @@ def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
         "F_K4_kN": inp.F_kN,
         "P_max": P_max,
         "delta_max": d_max,
-        "P_stop": F,                                  # N, load noted when D1 = delta_max
+        "P_stop": F,                                  # N, = max load (test stop)
         "K4_kN_rad": K4_kN_per_rad(inp),
         "h": h,
         "sum_inv_K": sum_inv_K,

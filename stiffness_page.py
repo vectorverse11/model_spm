@@ -3,9 +3,9 @@ CBFEM Virtual Test — Initial & Secant Stiffness (Streamlit page)
 ================================================================
 Hook-connector joint: upright + beam + hook connector (any number of lips).
 The user chooses or enters the sections, the component properties and the
-max load P. δ_max = P·a²(3l − a)/(6·E·I) is calculated from P; the virtual
-machine raises the load in steps until the D1 reading reaches δ_max, notes the
-load P_stop and the moment M = P_stop·a. K4 = F / θ_available (kN/rad) with F and
+max load P. The virtual machine raises the load in steps until it reaches the
+max load P, where the test stops; δ_max = P·a²(3l − a)/(6·E·I) and the moment
+M = P·a are calculated at the max load. K4 = F / θ_available (kN/rad) with F and
 θ_available entered by the user. Calculates the initial and secant
 stiffness, and generates the curves.
 
@@ -247,14 +247,14 @@ with r2[2].container(border=True):
 # 5. MAX DEFLECTION + RUN
 # ============================================================
 
-st.subheader("⏹ Max Deflection (test stop)")
+st.subheader("⏹ Max Load (test stop) & Max Deflection")
 with st.container(border=True):
     st.markdown("`δ_max = [P·a²·(3l − a)] / (6·E·I)`  ·  P = max load, a = 400 mm, "
                 "l = 500 mm, I = I_b (from C1)")
     m_cols = st.columns([1, 2])
     with m_cols[0]:
         P_max = num("P — max load (kN)", "P_max", fmt="%.3f",
-                    help="Max load, used only to calculate δ_max — not the step load.")
+                    help="The test stops when the load reaches this value. Also used for δ_max.")
     if P_max and I_b:
         m_cols[1].markdown(
             f"δ_max = {P_max * 1000:,.0f} × {LOAD_ARM:g}² × (3 × {BEAM_LENGTH:g} − "
@@ -266,7 +266,7 @@ c_inc, c_btn = st.columns([1, 2])
 with c_inc:
     increment = num("Load increment per step (kN)", "increment", fmt="%.3f",
                     help="Load starts at 0 kN and increases by this amount "
-                         "every step until the max deflection is reached.")
+                         "every step until the max load is reached.")
 c_btn.write("")
 c_btn.write("")
 go = c_btn.button("▶ Run Virtual Test", type="primary")
@@ -302,22 +302,23 @@ a = LOAD_ARM
 
 st.header(f"📊 Results{' — ' + R['client'] if R['client'] else ''}")
 st.caption(" · ".join(R["names"]) + " · " + R["steel"])
-st.success(f"⏹ Test stopped when D1 reached the max deflection **δ_max = "
-           f"{res['delta_max']:.4f} mm** after {res['steps']} steps. Load noted: "
-           f"**P_stop = {res['P_stop']:,.2f} N ({res['P_stop'] / 1000:.3f} kN)** · moment "
-           f"**M = P_stop × a = {res['M_max'] / 1e6:.4f} kN·m**.")
+st.success(f"⏹ Test stopped at the max load **P = {res['P_stop'] / 1000:.3f} kN** after "
+           f"{res['steps']} steps · D1 = **{rec['D1'][-1]:.4f} mm** · moment "
+           f"**M = P × a = {res['M_max'] / 1e6:.4f} kN·m** · δ_max = "
+           f"**{res['delta_max']:.4f} mm**.")
 
 m1 = st.columns(4)
 m1[0].metric("Max deflection δ_max", f"{res['delta_max']:.4f} mm",
              "P·a²(3l − a) / 6EI", delta_color="off")
-m1[1].metric("Load at max deflection P_stop", f"{res['P_stop'] / 1000:.3f} kN")
-m1[2].metric("Moment M = P_stop × a", f"{res['M_max'] / 1e6:.4f} kN·m")
+m1[1].metric("D1 at max load", f"{rec['D1'][-1]:.4f} mm")
+m1[2].metric("Moment M = P × a", f"{res['M_max'] / 1e6:.4f} kN·m")
 m1[3].metric("K4 = F / θ_available", f"{res['K4_kN_rad']:,.4f} kN/rad")
 m1[0].caption(f"δ_max = {res['P_max']:,.0f} × {a:g}² × (3 × {BEAM_LENGTH:g} − {a:g}) / "
               f"(6 × {E:,.0f} × {inp.I_b:g}) = **{res['delta_max']:.4f} mm**")
-m1[1].caption(f"P_stop = load at which D1 = δ_max = {res['delta_max']:.4f} mm → "
-              f"**{res['P_stop']:,.2f} N = {res['P_stop'] / 1000:.3f} kN**")
-m1[2].caption(f"M = P_stop × a = {res['P_stop']:,.2f} × {a:g} = {res['M_max']:,.0f} N·mm = "
+m1[1].caption(f"D1 = P·a³/(3·E·I_b) + a·tan θ = {res['P_stop']:,.0f} × {a:g}³ / (3 × "
+              f"{E:,.0f} × {inp.I_b:g}) + {a:g} × tan({rec['theta'][-1]:.6g}) = "
+              f"**{rec['D1'][-1]:.4f} mm**")
+m1[2].caption(f"M = P × a = {res['P_stop']:,.2f} × {a:g} = {res['M_max']:,.0f} N·mm = "
               f"**{res['M_max'] / 1e6:.4f} kN·m**")
 m1[3].caption(f"K4 = F / θ_available = {inp.F_kN:g} kN / {inp.theta_avail:g} rad = "
               f"**{res['K4_kN_rad']:,.4f} kN/rad** (used as {res['K4_kN_rad'] * 1000:,.1f} "
@@ -347,7 +348,7 @@ fig, ax = plt.subplots(1, 3, figsize=(17, 5))
 ax[0].plot(rec["D1"], P_kN, "g-", lw=2, label=f"D1 piston ({a:g} mm)")
 ax[0].plot(rec["D3"], P_kN, "r--", lw=1.5, label=f"D3 ({X_D3:g} mm)")
 ax[0].plot(rec["D2"], P_kN, "b-", lw=1.5, label=f"D2 ({X_D2:g} mm)")
-ax[0].axvline(res["delta_max"], color="grey", ls=":", label="δ_max (test stop)")
+ax[0].axvline(res["delta_max"], color="grey", ls=":", label="δ_max (beam, at max load)")
 ax[0].set(xlabel="Displacement (mm)", ylabel="Load P (kN)", title="Load vs Displacement")
 ax[0].grid(alpha=0.3)
 ax[0].legend(loc="lower right", fontsize=8)
@@ -358,7 +359,7 @@ ax[1].plot([0, th_ini * 1.15], [0, res["S_j_ini"] * th_ini * 1.15 / 1e6], "k:", 
            label="Initial stiffness S_j,ini")
 ax[1].plot([0, th[-1]], [0, res["M_max"] / 1e6], "b--", lw=1.3,
            label="Secant stiffness S_j = S_j,ini/2")
-ax[1].axhline(res["M_max"] / 1e6, color="grey", ls=":", label="M = P_stop × a")
+ax[1].axhline(res["M_max"] / 1e6, color="grey", ls=":", label="M = P × a (max load)")
 ax[1].set(xlabel="Rotation θ (rad)", ylabel="Moment M (kN·m)", title="Moment vs Rotation")
 ax[1].grid(alpha=0.3)
 ax[1].legend(loc="lower right", fontsize=8)
@@ -390,9 +391,9 @@ st.markdown(f"""
    {res['P_max']:,.0f} × {a:g}² × (3 × {BEAM_LENGTH:g} − {a:g}) / (6 × {E:,.0f} × {inp.I_b:g})
    = **{res['delta_max']:.4f} mm**
 2. **Virtual test:** the load rises from 0 in {R['inc']} kN steps and the D1 piston
-   reading grows with it. When D1 reaches δ_max the test stops and the load is noted:
-   **P_stop = {res['P_stop']:,.2f} N**
-3. **Moment** M = P_stop × a = {res['P_stop']:,.2f} × {a:g} = {res['M_max']:,.0f} N·mm =
+   reading grows with it. The test stops at the max load
+   **P = {res['P_stop']:,.2f} N**, where D1 = **{rec['D1'][-1]:.4f} mm**
+3. **Moment** M = P × a = {res['P_stop']:,.2f} × {a:g} = {res['M_max']:,.0f} N·mm =
    **{res['M_max'] / 1e6:.4f} kN·m**
 4. **K4 = F / θ_available** = {inp.F_kN:g} kN / {inp.theta_avail:g} rad =
    **{res['K4_kN_rad']:,.4f} kN/rad** (θ_available in radians, not converted to mm)
@@ -437,8 +438,8 @@ summary = pd.concat([
     pd.DataFrame([
         {"Component": "Max load P (kN)", "Working": f"{res['P_max'] / 1000:g}"},
         {"Component": "Max deflection δ_max (mm)", "Working": f"{res['delta_max']:.4f}"},
-        {"Component": "P_stop — load at max deflection (N)", "Working": f"{res['P_stop']:.2f}"},
-        {"Component": "Moment M = P_stop × a (kN·m)", "Working": f"{res['M_max'] / 1e6:.4f}"},
+        {"Component": "D1 at max load (mm)", "Working": f"{rec['D1'][-1]:.4f}"},
+        {"Component": "Moment M = P × a (kN·m)", "Working": f"{res['M_max'] / 1e6:.4f}"},
         {"Component": "K4 = F / θ_available (kN/rad)", "Working": f"{res['K4_kN_rad']:.4f}"},
         {"Component": "1/K1 + … + 1/K6", "1/K": res["sum_inv_K"]},
         {"Component": "h (mm)", "Working": f"{res['h']:g}"},
