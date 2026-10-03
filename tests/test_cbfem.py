@@ -51,15 +51,15 @@ def test_moment_output():
 def test_works_for_5_lip_connector():
     r = run(inp(H=245.0, t_p=4.0, P_max_kN=5.0), 0.02)
     assert r["P_stop"] > 0 and r["K4_kN_rad"] == pytest.approx(3.86 / 0.03634)
-    assert r["record"]["D1"][-1] == pytest.approx(r["delta_max"])
+    assert r["record"]["P"][-1] == pytest.approx(5000.0)
 
 
-def test_test_stops_when_D1_reaches_delta_max():
+def test_test_stops_at_max_load():
     r = run(inp(), 0.01)
     rec = r["record"]
-    assert rec["D1"][-1] == pytest.approx(r["delta_max"], rel=1e-9)
-    assert all(d < r["delta_max"] for d in rec["D1"][:-1])
-    assert rec["P"][-1] == pytest.approx(r["P_stop"])
+    assert rec["P"][-1] == pytest.approx(3860.0) == r["P_stop"]
+    assert all(p < 3860.0 for p in rec["P"][:-1])
+    assert len(rec["P"]) == 387                                    # 0, 0.01, ... 3.86 kN
 
 
 def test_component_values_by_hand():
