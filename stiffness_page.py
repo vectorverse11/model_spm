@@ -5,7 +5,7 @@ Hook-connector joint: upright + beam + hook connector (any number of lips).
 The user chooses or enters the sections, the component properties and the
 max load P. The virtual machine raises the load in steps until it reaches the
 max load P, where the test stops; δ_max = P·a²(3l − a)/(6·E·I) and the moment
-M = P·a are calculated at the max load. K4 = F / θ_available (kN/rad) with F and
+M = P·a are calculated at the max load. K4 = F / (θ_available·H_b) (N/mm) with F and
 θ_available entered by the user. Calculates the initial and secant
 stiffness, and generates the curves.
 
@@ -221,12 +221,15 @@ with r1[2].container(border=True):
            G * A_h / L_h if A_h and L_h else None)
 
 with r2[0].container(border=True):
-    st.markdown("**C4 · Hook–upright bearing**  \n`K4 = F / θ_available`  (kN/rad)")
+    st.markdown("**C4 · Hook–upright bearing**  \n`K4 = F / (θ_available × H_b)`")
     F_K4 = num("F — force (kN)", "F_K4", fmt="%.4f")
     theta_avail = num("θ_available (rad)", "theta_avail", fmt="%.5f",
                       help="Enter in radians. It is not converted to mm.")
-    if F_K4 and theta_avail:
-        st.markdown(f"K4 = {F_K4:g} / {theta_avail:g} = **{F_K4 / theta_avail:,.4f} kN/rad**")
+    hb_c4 = H - (H_t + beam_depth) if H and H_t and beam_depth else None
+    st.caption("δ_bearing = θ_available × H_b (mm), H_b from the geometry section.")
+    if F_K4 and theta_avail and hb_c4 and hb_c4 > 0:
+        show_k("K4", f"{F_K4 * 1000:g} / ({theta_avail:g} × {hb_c4:g})",
+               F_K4 * 1000 / (theta_avail * hb_c4))
 
 with r2[1].container(border=True):
     st.markdown("**C5 · Upright local deformation**  \n`K5 = 3·E·I_u / L_u³`")
@@ -312,7 +315,7 @@ m1[0].metric("Max deflection δ_max", f"{res['delta_max']:.4f} mm",
              "P·a²(3l − a) / 6EI", delta_color="off")
 m1[1].metric("D1 at max load", f"{rec['D1'][-1]:.4f} mm")
 m1[2].metric("Moment M = P × a", f"{res['M_max'] / 1e6:.4f} kN·m")
-m1[3].metric("K4 = F / θ_available", f"{res['K4_kN_rad']:,.4f} kN/rad")
+m1[3].metric("K4 = F / (θ_available × H_b)", f"{res['K4']:,.2f} N/mm")
 m1[0].caption(f"δ_max = {res['P_max']:,.0f} × {a:g}² × (3 × {BEAM_LENGTH:g} − {a:g}) / "
               f"(6 × {E:,.0f} × {inp.I_b:g}) = **{res['delta_max']:.4f} mm**")
 m1[1].caption(f"D1 = P·a³/(3·E·I_b) + a·tan θ = {res['P_stop']:,.0f} × {a:g}³ / (3 × "
@@ -320,9 +323,9 @@ m1[1].caption(f"D1 = P·a³/(3·E·I_b) + a·tan θ = {res['P_stop']:,.0f} × {a
               f"**{rec['D1'][-1]:.4f} mm**")
 m1[2].caption(f"M = P × a = {res['P_stop']:,.2f} × {a:g} = {res['M_max']:,.0f} N·mm = "
               f"**{res['M_max'] / 1e6:.4f} kN·m**")
-m1[3].caption(f"K4 = F / θ_available = {inp.F_kN:g} kN / {inp.theta_avail:g} rad = "
-              f"**{res['K4_kN_rad']:,.4f} kN/rad** (used as {res['K4_kN_rad'] * 1000:,.1f} "
-              "N/rad in 1/K1 + … + 1/K6)")
+m1[3].caption(f"K4 = F / (θ_available × H_b) = {inp.F_kN * 1000:g} / ({inp.theta_avail:g} × "
+              f"{res['H_b']:g}) = {inp.F_kN * 1000:g} / {res['delta_bearing']:.4f} = "
+              f"**{res['K4']:,.2f} N/mm**")
 m2 = st.columns(3)
 m2[0].metric("Initial stiffness S_j,ini", f"{res['S_j_ini'] / 1e6:,.3f} kN·m/rad")
 m2[1].metric("Secant stiffness S_j = S_j,ini / 2", f"{res['S_j'] / 1e6:,.3f} kN·m/rad")
@@ -377,8 +380,8 @@ comp_df = pd.DataFrame([{
     "Component": f"{c['C']} {c['Component']}",
     "Formula": c["Formula"],
     "Working": c["Working"],
-    "K (N/mm; K4 in N/rad)": round(c["K"], 3),
-    "1/K": c["1/K"],
+    "K (N/mm)": round(c["K"], 3),
+    "1/K (mm/N)": c["1/K"],
 } for c in res["components"]])
 st.dataframe(comp_df, hide_index=True, width="stretch")
 
@@ -395,10 +398,9 @@ st.markdown(f"""
    **P = {res['P_stop']:,.2f} N**, where D1 = **{rec['D1'][-1]:.4f} mm**
 3. **Moment** M = P × a = {res['P_stop']:,.2f} × {a:g} = {res['M_max']:,.0f} N·mm =
    **{res['M_max'] / 1e6:.4f} kN·m**
-4. **K4 = F / θ_available** = {inp.F_kN:g} kN / {inp.theta_avail:g} rad =
-   **{res['K4_kN_rad']:,.4f} kN/rad** (θ_available in radians, not converted to mm)
-5. **1/K1 + 1/K2 + 1/K3 + 1/K4 + 1/K5 + 1/K6** = {terms} = **{res['sum_inv_K']:.6g}**
-   (K4 used as {res['K4_kN_rad'] * 1000:,.1f} N/rad)
+4. **K4 = F / (θ_available × H_b)** = {inp.F_kN * 1000:g} / ({inp.theta_avail:g} × {res['H_b']:g})
+   = **{res['K4']:,.2f} N/mm** (δ_bearing = θ_available × H_b = {res['delta_bearing']:.4f} mm)
+5. **1/K1 + 1/K2 + 1/K3 + 1/K4 + 1/K5 + 1/K6** = {terms} = **{res['sum_inv_K']:.6g} mm/N**
 6. **Initial stiffness** S_j,ini = E × h² / (1/K1 + … + 1/K6) =
    {E:,.0f} × {res['h']:g}² / {res['sum_inv_K']:.6g} = {res['S_j_ini']:,.4g}
    → **{res['S_j_ini'] / 1e6:,.3f} kN·m/rad**
@@ -440,8 +442,7 @@ summary = pd.concat([
         {"Component": "Max deflection δ_max (mm)", "Working": f"{res['delta_max']:.4f}"},
         {"Component": "D1 at max load (mm)", "Working": f"{rec['D1'][-1]:.4f}"},
         {"Component": "Moment M = P × a (kN·m)", "Working": f"{res['M_max'] / 1e6:.4f}"},
-        {"Component": "K4 = F / θ_available (kN/rad)", "Working": f"{res['K4_kN_rad']:.4f}"},
-        {"Component": "1/K1 + … + 1/K6", "1/K": res["sum_inv_K"]},
+        {"Component": "1/K1 + … + 1/K6 (mm/N)", "1/K (mm/N)": res["sum_inv_K"]},
         {"Component": "h (mm)", "Working": f"{res['h']:g}"},
         {"Component": "S_j,ini (kN·m/rad)", "Working": f"{res['S_j_ini'] / 1e6:.4f}"},
         {"Component": "S_j (kN·m/rad)", "Working": f"{res['S_j'] / 1e6:.4f}"},

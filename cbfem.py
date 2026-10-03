@@ -15,14 +15,14 @@ Rig: a = 400 mm (load point / D1 piston), l = 500 mm (beam length),
    stops when the load reaches the MAX load P (user input).
        delta_max = P a^2 (3 l - a) / (6 E I_b)     beam deflection at the max load
 
-2. Component stiffnesses (K1-K3, K5, K6 in N/mm; K4 in kN/rad)
+2. Component stiffnesses (all in N/mm)
        K1 = 3 E I_b / L_b^3        beam local deformation
        K2 = 3 E I_h / L_h^3        hook bending
        K3 = G A_h / L_h            hook shear
-       K4 = F / theta_available    hook-upright bearing, kN/rad
+       K4 = F / (theta_available * H_b)   hook-upright bearing, N/mm
             F (kN) and theta_available (rad) are entered by the user;
-            theta_available stays in radians (not converted to mm).
-            In the sum 1/K1 + ... + 1/K6, K4 is used as N/rad (= kN/rad x 1000).
+            the bearing deflection is delta = theta_available * H_b (mm),
+            H_b = H - (H_t + beam depth).
        K5 = 3 E I_u / L_u^3        upright local deformation
        K6 = E b_l t_l^3 / (4 L_l^3) upright lip deformation
 
@@ -83,9 +83,9 @@ class CBFEMInputs:
     theta_avail: float  # theta_available for K4, rad (user input)
 
 
-def K4_kN_per_rad(inp: "CBFEMInputs") -> float:
-    """K4 = F / theta_available, kN/rad."""
-    return inp.F_kN / inp.theta_avail
+def K4_N_per_mm(inp: "CBFEMInputs") -> float:
+    """K4 = F / (theta_available * H_b), N/mm (F entered in kN)."""
+    return inp.F_kN * 1000.0 / (inp.theta_avail * H_b(inp))
 
 
 def deflection(P: float, I_b: float) -> float:
@@ -99,7 +99,7 @@ def H_b(inp: CBFEMInputs) -> float:
 
 
 def components(inp: CBFEMInputs) -> List[Dict]:
-    """K1-K3, K5, K6 in N/mm; K4 in N/rad (shown to the user in kN/rad)."""
+    """K1 ... K6, all in N/mm."""
     return [
         {"C": "C1", "Component": "Beam local deformation",
          "Formula": "K1 = 3·E·I_b / L_b³",
@@ -114,10 +114,9 @@ def components(inp: CBFEMInputs) -> List[Dict]:
          "Working": f"{G:.0f} × {inp.A_h:g} / {inp.L_h:g}",
          "K": G * inp.A_h / inp.L_h},
         {"C": "C4", "Component": "Hook–upright bearing",
-         "Formula": "K4 = F / θ_available (kN/rad)",
-         "Working": f"{inp.F_kN:g} kN / {inp.theta_avail:g} rad = "
-                    f"{K4_kN_per_rad(inp):,.4f} kN/rad",
-         "K": K4_kN_per_rad(inp) * 1000.0},             # N/rad in the sum
+         "Formula": "K4 = F / (θ_available × H_b)",
+         "Working": f"{inp.F_kN * 1000:g} / ({inp.theta_avail:g} × {H_b(inp):g})",
+         "K": K4_N_per_mm(inp)},
         {"C": "C5", "Component": "Upright local deformation",
          "Formula": "K5 = 3·E·I_u / L_u³",
          "Working": f"3 × {E:.0f} × {inp.I_u:g} / {inp.L_u:g}³",
@@ -204,7 +203,8 @@ def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
         "P_max": P_max,
         "delta_max": d_max,
         "P_stop": F,                                  # N, = max load (test stop)
-        "K4_kN_rad": K4_kN_per_rad(inp),
+        "K4": K4_N_per_mm(inp),                       # N/mm
+        "delta_bearing": inp.theta_avail * hb,        # mm
         "h": h,
         "sum_inv_K": sum_inv_K,
         "K_total": K_total,
