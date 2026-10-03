@@ -14,15 +14,16 @@ Rig: a = 400 mm (load point / D1 piston), l = 500 mm (beam length),
        delta_max = P a^2 (3 l - a) / (6 E I_b)     P = MAX load (user input),
                                                    not the step load
    The load rises from 0 kN in steps of the user-entered increment; when the D1 piston
-   reading reaches delta_max the test stops and the load is noted as F.
+   reading reaches delta_max the test stops and that load is noted (P_stop).
 
-2. Component stiffnesses (N/mm)
+2. Component stiffnesses (K1-K3, K5, K6 in N/mm; K4 in kN/rad)
        K1 = 3 E I_b / L_b^3        beam local deformation
        K2 = 3 E I_h / L_h^3        hook bending
        K3 = G A_h / L_h            hook shear
-       K4 = F / delta_bearing      hook-upright bearing
-            phi_avail = t_p / H_b,  H_b = H - (H_t + beam depth)
-            delta_bearing = phi_avail * H_b = t_p   ->  K4 = F / t_p
+       K4 = F / theta_available    hook-upright bearing, kN/rad
+            F (kN) and theta_available (rad) are entered by the user;
+            theta_available stays in radians (not converted to mm).
+            In the sum 1/K1 + ... + 1/K6, K4 is used as N/rad (= kN/rad x 1000).
        K5 = 3 E I_u / L_u^3        upright local deformation
        K6 = E b_l t_l^3 / (4 L_l^3) upright lip deformation
 
@@ -40,7 +41,7 @@ Rig: a = 400 mm (load point / D1 piston), l = 500 mm (beam length),
 """
 
 from dataclasses import dataclass
-from math import atan, degrees, tan
+from math import tan
 from typing import Dict, List
 
 E = 210000.0                    # N/mm^2
@@ -78,6 +79,14 @@ class CBFEMInputs:
     L_l: float          # effective lip length, mm
     # Max deflection
     P_max_kN: float     # max load P used in delta_max, kN (user input)
+    # C4 bearing
+    F_kN: float         # force F for K4, kN (user input)
+    theta_avail: float  # theta_available for K4, rad (user input)
+
+
+def K4_kN_per_rad(inp: "CBFEMInputs") -> float:
+    """K4 = F / theta_available, kN/rad."""
+    return inp.F_kN / inp.theta_avail
 
 
 def deflection(P: float, I_b: float) -> float:
@@ -90,8 +99,8 @@ def H_b(inp: CBFEMInputs) -> float:
     return inp.H - (inp.H_t + inp.beam_depth)
 
 
-def components(inp: CBFEMInputs, F: float) -> List[Dict]:
-    """K1 ... K6 in N/mm; K4 uses the load F noted at the stop."""
+def components(inp: CBFEMInputs) -> List[Dict]:
+    """K1-K3, K5, K6 in N/mm; K4 in N/rad (shown to the user in kN/rad)."""
     return [
         {"C": "C1", "Component": "Beam local deformation",
          "Formula": "K1 = 3·E·I_b / L_b³",
@@ -106,9 +115,10 @@ def components(inp: CBFEMInputs, F: float) -> List[Dict]:
          "Working": f"{G:.0f} × {inp.A_h:g} / {inp.L_h:g}",
          "K": G * inp.A_h / inp.L_h},
         {"C": "C4", "Component": "Hook–upright bearing",
-         "Formula": "K4 = F / δ_bearing = F / t_p",
-         "Working": f"{F:,.2f} / {inp.t_p:g}",
-         "K": F / inp.t_p},
+         "Formula": "K4 = F / θ_available (kN/rad)",
+         "Working": f"{inp.F_kN:g} kN / {inp.theta_avail:g} rad = "
+                    f"{K4_kN_per_rad(inp):,.4f} kN/rad",
+         "K": K4_kN_per_rad(inp) * 1000.0},             # N/rad in the sum
         {"C": "C5", "Component": "Upright local deformation",
          "Formula": "K5 = 3·E·I_u / L_u³",
          "Working": f"3 × {E:.0f} × {inp.I_u:g} / {inp.L_u:g}³",
@@ -143,53 +153,43 @@ def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
         raise ValueError(
             f"H_b = H − (H_t + beam depth) = {inp.H:g} − ({inp.H_t:g} + "
             f"{inp.beam_depth:g}) = {hb:g} mm must be greater than 0.")
-    a, h, t_p, I_b = LOAD_ARM, inp.H, inp.t_p, inp.I_b
-    phi_avail = t_p / hb                              # rad (as in the notes)
+    if inp.F_kN <= 0 or inp.theta_avail <= 0:
+        raise ValueError("F and θ_available for K4 must be greater than 0.")
+    a, h, I_b = LOAD_ARM, inp.H, inp.I_b
 
     # ---- 1. max deflection from the MAX load P (not the step load) ----
     P_max = inp.P_max_kN * 1000.0                     # N
     d_max = deflection(P_max, I_b)                    # mm
 
-    # ---- 2. load F at which D1 reaches d_max ----
-    # K4 = F / t_p, so S_j,ini depends on F; at the stop point the secant is
-    # S_j = S_j,ini / 2, i.e. theta_stop = 2 F a / S_j,ini(F).
-    others = components(inp, 1.0)                     # K4 placeholder, removed below
-    R = sum(1.0 / c["K"] for c in others if c["C"] != "C4")
-
-    def S_of(F):
-        return E * h**2 / (R + t_p / F)
-
-    def D1_stop(F):
-        return D_at(a, F, 2.0 * F * a / S_of(F), I_b)
-
-    lo, hi = 0.0, max(P_max, 1.0)
-    if D1_stop(1e-9) >= d_max:
-        raise ValueError(
-            f"δ_max = {d_max:.4g} mm is reached before any load is applied — "
-            "check P, I_b and the component inputs.")
-    while D1_stop(hi) < d_max:
-        hi *= 2.0
-    for _ in range(200):                              # bisection: D1 rises with F
-        mid = 0.5 * (lo + hi)
-        lo, hi = (mid, hi) if D1_stop(mid) < d_max else (lo, mid)
-    F = hi
-
-    # ---- 3. components (K4 from the noted load F) and joint stiffness ----
-    comps = components(inp, F)
+    # ---- 2. components and joint stiffness (as in the formula sheet) ----
+    comps = components(inp)
     for c in comps:
         c["1/K"] = 1.0 / c["K"]
-    sum_inv_K = sum(c["1/K"] for c in comps)          # mm/N
-    K_total = 1.0 / sum_inv_K                         # N/mm
+    sum_inv_K = sum(c["1/K"] for c in comps)
+    K_total = 1.0 / sum_inv_K
     S_ini = E * h**2 / sum_inv_K
     S_j = S_ini / ETA
     limit = 0.5 * E * I_b / inp.L_b
+
+    # ---- 3. load P_stop at which D1 reaches d_max ----
+    # At the stop point the secant is S_j = S_j,ini / 2: theta_stop = 2 P a / S_j,ini.
+    def D1_stop(P):
+        return D_at(a, P, 2.0 * P * a / S_ini, I_b)
+
+    lo, hi = 0.0, max(P_max, 1.0)
+    while D1_stop(hi) < d_max:
+        hi *= 2.0
+    for _ in range(200):                              # bisection: D1 rises with P
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if D1_stop(mid) < d_max else (lo, mid)
+    F = hi                                            # P_stop
 
     # ---- 4. virtual test: load steps from 0 until D1 = delta_max ----
     M_max = F * a
     inc = increment_kN * 1000.0
     if inc <= 0 or F / inc > 200_000:
         raise ValueError(f"Load increment {increment_kN:g} kN gives too many steps "
-                         f"(F = {F / 1000:.3f} kN) — use a larger increment.")
+                         f"(stop load {F / 1000:.3f} kN) — use a larger increment.")
 
     def state(P):
         th = theta_of_M(P * a, S_ini, M_max)
@@ -210,20 +210,18 @@ def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
     return {
         "components": comps,
         "H_b": hb,
-        "phi_avail": phi_avail,
-        "theta_available_rad": atan(phi_avail),
-        "theta_available_deg": degrees(atan(phi_avail)),
-        "delta_bearing": t_p,
+        "theta_available": inp.theta_avail,
+        "F_K4_kN": inp.F_kN,
         "P_max": P_max,
         "delta_max": d_max,
-        "F": F,
-        "K4": F / t_p,
+        "P_stop": F,                                  # N, load noted when D1 = delta_max
+        "K4_kN_rad": K4_kN_per_rad(inp),
         "h": h,
         "sum_inv_K": sum_inv_K,
         "K_total": K_total,
         "S_j_ini": S_ini,
         "S_j": S_j,
-        "M_max": M_max,                               # N mm, moment at the stop: F * a
+        "M_max": M_max,                               # N mm, moment at the stop: P_stop * a
         "M_el": 2.0 / 3.0 * M_max,
         "check_limit": limit,
         "check_ok": S_ini > limit,

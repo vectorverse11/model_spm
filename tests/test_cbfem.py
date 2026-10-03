@@ -11,7 +11,7 @@ from cbfem import (E, G, LOAD_ARM, CBFEMInputs, H_b, deflection, run)
 PDF_3LIP = dict(H=155.0, H_t=55.0, beam_depth=80.0, t_p=3.0,
                 I_b=410438.0, L_b=400.0, L_h=155.0,
                 I_u=378760.0, L_u=800.0, b_l=12.1, t_l=3.0, L_l=21.6)
-PLACEHOLDER = dict(I_h=1.0e5, A_h=300.0, P_max_kN=3.86)
+PLACEHOLDER = dict(I_h=1.0e5, A_h=300.0, P_max_kN=3.86, F_kN=3.86, theta_avail=0.03634)
 
 
 def inp(**over):
@@ -24,7 +24,7 @@ def test_fixed_values():
 
 def test_max_load_is_required():
     with pytest.raises(TypeError):
-        CBFEMInputs(**PDF_3LIP, I_h=1.0e5, A_h=300.0)        # no P_max_kN
+        CBFEMInputs(**PDF_3LIP, I_h=1.0e5, A_h=300.0, F_kN=3.86, theta_avail=0.03634)  # no P
 
 
 def test_catalog_sections():
@@ -44,13 +44,13 @@ def test_max_deflection_from_max_load():
 
 def test_moment_output():
     r = run(inp(), 0.01)
-    assert r["M_max"] == pytest.approx(r["F"] * LOAD_ARM)            # M = F * a
+    assert r["M_max"] == pytest.approx(r["P_stop"] * LOAD_ARM)       # M = P_stop * a
     assert r["record"]["M"][-1] == pytest.approx(r["M_max"])
 
 
 def test_works_for_5_lip_connector():
     r = run(inp(H=245.0, t_p=4.0, P_max_kN=5.0), 0.02)
-    assert r["F"] > 0 and r["K4"] == pytest.approx(r["F"] / 4.0)
+    assert r["P_stop"] > 0 and r["K4_kN_rad"] == pytest.approx(3.86 / 0.03634)
     assert r["record"]["D1"][-1] == pytest.approx(r["delta_max"])
 
 
@@ -59,7 +59,7 @@ def test_test_stops_when_D1_reaches_delta_max():
     rec = r["record"]
     assert rec["D1"][-1] == pytest.approx(r["delta_max"], rel=1e-9)
     assert all(d < r["delta_max"] for d in rec["D1"][:-1])
-    assert rec["P"][-1] == pytest.approx(r["F"])
+    assert rec["P"][-1] == pytest.approx(r["P_stop"])
 
 
 def test_component_values_by_hand():
@@ -68,7 +68,8 @@ def test_component_values_by_hand():
     assert K["C1"] == pytest.approx(4040.2, abs=0.1)
     assert K["C2"] == pytest.approx(3 * 210000 * 1.0e5 / 155**3)
     assert K["C3"] == pytest.approx(G * 300 / 155)
-    assert K["C4"] == pytest.approx(r["F"] / 3.0)                   # K4 = F / t_p
+    assert K["C4"] == pytest.approx(3860 / 0.03634)                 # K4 = F / θ, N/rad
+    assert r["K4_kN_rad"] == pytest.approx(106.219, abs=1e-3)       # kN/rad
     assert K["C5"] == pytest.approx(466.1, abs=0.1)
     assert K["C6"] == pytest.approx(1702.0, abs=0.5)
 
@@ -95,3 +96,15 @@ def test_bad_geometry_rejected():
     assert H_b(inp(H=120.0)) < 0
     with pytest.raises(ValueError):
         run(inp(H=120.0), 0.01)
+
+
+def test_user_hand_calc_5_lip():
+    # User's 5-lip values: K4 = 3.86 / 0.03634 kN/rad, S_j,ini = E h^2 / sum(1/K)
+    r = run(inp(H=245.0, t_p=4.0, I_h=3869.0, L_h=245.0, A_h=78.4, t_l=4.0, L_l=19.6),
+            0.01)
+    assert r["S_j_ini"] == pytest.approx(1.4556e12, rel=1e-3)
+
+
+def test_K4_inputs_must_be_positive():
+    with pytest.raises(ValueError):
+        run(inp(theta_avail=0.0), 0.01)
