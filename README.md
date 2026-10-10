@@ -23,12 +23,14 @@ Optional checks: `python -m pip install pytest`, then `python -m pytest -q tests
 ## Files
 | File | Purpose |
 |---|---|
-| `app.py` | Entry point |
+| `app.py` | Entry point (two pages: CBFEM Virtual Test, Stub Column Test) |
+| `stub_page.py` | Stub Column Test page (inputs, results, graphs, CSV) |
+| `stub.py` | Stub column engine: section properties, effective widths, buckling, virtual test |
 | `stiffness_page.py` | CBFEM Virtual Test page (inputs, results, curves, CSV) |
 | `cbfem.py` | Formulae and the virtual test engine |
 | `catalog.py` | "Select from list" sections and the IS 2062 : 2011 tables (add entries here) |
 | `assets/` | Section drawings shown on the upright, beam and connector cards |
-| `tests/test_cbfem.py` | Checks against hand calculations |
+| `tests/` | Checks against hand calculations and textbook formulas |
 
 ## CBFEM Virtual Test
 Fixed values: E = 210000 N/mm², G = 80769 N/mm², ν = 0.3. Rig: a = 400 mm (load point / D1 piston), l = 500 mm (beam length), D2 = 40 mm, D3 = 140 mm.
@@ -84,3 +86,29 @@ Check:    S_j,ini > 0.5·E·I_b / L_b
 * Graphs: Load vs Displacement, Moment vs Rotation, Load vs Step
 * Step-by-step working
 * Sensor CSV (Load, Moment, D1, D2, D3) and a results CSV
+
+## Stub Column Test (EN 15512 Annex A.2.1)
+A virtual compression test of a short perforated upright (lipped channel; lip = 0 for a plain
+channel). Method: **Effective Width Method** (EN 1993-1-3 / EN 1993-1-5 §4.4) for local
+buckling and perforations, with EN 1993-1-1 §6.3.1 / EN 1993-1-3 §6.2.3 for buckling of the stub.
+
+**Inputs (all from the user):**
+* Specimen: W, D, t, lip length, length c
+* Perforations: pitch, and the number and width of holes across the web and across each flange
+* Cap and base plates: length, width and thickness
+* f_y and γ_M0
+* Test arrangement (Alternative 1 or 2), dial least count (mm/div), load increment (kN)
+
+**Steps:**
+1. Specimen checks: c ≥ 3 × greatest flat width, ≥ 5 pitches, pitch 50–70 mm, plates project ≥ 10 mm, cap plate ≥ 30 mm.
+2. Section properties: A_g, A_net, centroids, I, J, I_w and the shear centre (centreline model).
+3. Effective widths: λ_p = (b/t)/(28.4·ε·√k_σ), with ρ = (λ_p − 0.22)/λ_p² for internal plates and (λ_p − 0.188)/λ_p² for outstands. Holes are removed where they overlap the effective strips.
+4. Buckling: the lengths depend on the arrangement.
+   * Alternative 1: L_F = b = c + 2(cap t + base t) and L_T = c/2.
+   * Alternative 2: L_F = L_T = c/2.
+   * Then λ̄ = √(A_eff·f_y/N_cr) and χ from curve b.
+5. Failure load:
+   * Alternative 1: N_u = 1/(1/(χ·A_eff·f_y) + |e|/(W_eff·f_y)). The load position is swept between the gross and net centroids for the maximum.
+   * Alternative 2: N_u = χ·A_eff·f_y.
+6. Load–dial curve: σ = N/A_eff(σ), δ = N·c/(E·A_eff(σ)), and dial = δ / least count. The proof load is the load at the first local buckling.
+7. Results: R_k, A_eff = R_k/f_y (adjusted if λ̄ > 0.2), N_b,Rd = R_k/γ_M0, Q = A_eff/A_g, slopes 1–3, a readings table and CSV.
