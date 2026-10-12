@@ -55,3 +55,13 @@ def test_alternative_2_is_concentric_and_not_lower():
 def test_bad_holes_rejected():
     with pytest.raises(ValueError):
         run(inp(n_web=20, d_web=10), 1.0)
+
+
+def test_plate_projection_checked_along_web_only():
+    chk = {c["Criterion"]: c for c in run(inp(cap_L=130, cap_W=100, base_L=130, base_W=100),
+                                          1.0)["checks"]}
+    row = next(v for k, v in chk.items() if k.startswith("Plates project"))
+    assert row["OK"]                                     # (130 − 110)/2 = 10 ≥ 10
+    row = next(v for k, v in {c["Criterion"]: c for c in run(inp(cap_L=120), 1.0)["checks"]}
+               .items() if k.startswith("Plates project"))
+    assert not row["OK"]                                 # (120 − 110)/2 = 5 < 10

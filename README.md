@@ -100,7 +100,7 @@ buckling and perforations, with EN 1993-1-1 §6.3.1 / EN 1993-1-3 §6.2.3 for bu
 * Test arrangement (Alternative 1 or 2), dial least count (mm/div), load increment (kN)
 
 **Steps:**
-1. Specimen checks: c ≥ 3 × greatest flat width, ≥ 5 pitches, pitch 50–70 mm, plates project ≥ 10 mm, cap plate ≥ 30 mm.
+1. Specimen checks: c ≥ 3 × greatest flat width, ≥ 5 pitches, pitch 50–70 mm, cap and base plates project ≥ 10 mm per side along the web ((plate length − W)/2), cap plate ≥ 30 mm.
 2. Section properties: A_g, A_net, centroids, I, J, I_w and the shear centre (centreline model).
 3. Effective widths: λ_p = (b/t)/(28.4·ε·√k_σ), with ρ = (λ_p − 0.22)/λ_p² for internal plates and (λ_p − 0.188)/λ_p² for outstands. Holes are removed where they overlap the effective strips.
 4. Buckling: the lengths depend on the arrangement.
