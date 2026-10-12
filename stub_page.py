@@ -93,7 +93,7 @@ with m2.container(border=True):
                                           2: "Alternative 2 — clamped platen"}[a])
     st.caption("Alt 1: flexural buckling length = b, torsional = c/2; load position between "
                "the gross and net centroid, adjusted for the maximum failure load.  \n"
-               "Alt 2: flexural and torsional buckling lengths = c/2; concentric load.")
+               "Alt 2: flexural and torsional buckling lengths = c (full length); concentric load.")
     least = num("Dial gauge least count (mm/div)", "s_least", fmt="%.4f")
     inc = num("Load increment per step (kN)", "s_inc", fmt="%.3f")
 
