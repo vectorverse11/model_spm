@@ -264,8 +264,8 @@ def critical_loads(inp: StubInputs) -> Dict[str, float]:
 def specimen_checks(inp: StubInputs) -> List[Dict]:
     b = widths(inp)
     w_max = max(b.values())
-    proj = [(inp.cap_L - inp.W) / 2.0, (inp.cap_W - inp.D) / 2.0,
-            (inp.base_L - inp.W) / 2.0, (inp.base_W - inp.D) / 2.0]
+    cap_p = (inp.cap_L - inp.W) / 2.0                 # along the web, per side
+    base_p = (inp.base_L - inp.W) / 2.0
     return [
         {"Criterion": "Length ≥ 3 × greatest flat width",
          "Working": f"c = {inp.c:g} ≥ 3 × {w_max:g} = {3 * w_max:g} mm",
@@ -275,9 +275,10 @@ def specimen_checks(inp: StubInputs) -> List[Dict]:
          "OK": inp.c / inp.pitch >= 5 - 1e-9},
         {"Criterion": "Hole pitch between 50 and 70 mm",
          "Working": f"pitch = {inp.pitch:g} mm", "OK": 50 <= inp.pitch <= 70},
-        {"Criterion": "Plates project ≥ 10 mm beyond the upright edge",
-         "Working": "per side: " + ", ".join(f"{p:g}" for p in proj) + " mm",
-         "OK": min(proj) >= 10},
+        {"Criterion": "Plates project ≥ 10 mm beyond the upright edge (along the web)",
+         "Working": f"cap: ({inp.cap_L:g} − {inp.W:g}) / 2 = {cap_p:g} mm · "
+                    f"base: ({inp.base_L:g} − {inp.W:g}) / 2 = {base_p:g} mm",
+         "OK": min(cap_p, base_p) >= 10},
         {"Criterion": "Cap plate thickness ≥ 30 mm",
          "Working": f"{inp.cap_t:g} mm", "OK": inp.cap_t >= 30},
     ]
