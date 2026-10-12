@@ -49,7 +49,7 @@ def test_virtual_test_runs_to_failure():
 def test_alternative_2_is_concentric_and_not_lower():
     r1, r2 = run(inp(alternative=1), 1.0), run(inp(alternative=2), 1.0)
     assert r2["e"] == 0 and r2["N_u"] >= r1["N_u"]
-    assert r1["cr"]["L_F"] == 380 and r2["cr"]["L_F"] == 150
+    assert r1["cr"]["L_F"] == 380 and r2["cr"]["L_F"] == r2["cr"]["L_T"] == 300
 
 
 def test_bad_holes_rejected():
@@ -65,3 +65,12 @@ def test_plate_projection_checked_along_web_only():
     row = next(v for k, v in {c["Criterion"]: c for c in run(inp(cap_L=120), 1.0)["checks"]}
                .items() if k.startswith("Plates project"))
     assert not row["OK"]                                 # (120 − 110)/2 = 5 < 10
+
+
+def test_area_adjusted_when_slenderness_exceeds_0_2():
+    r = run(inp(alternative=2, c=1500), 1.0)
+    assert r["cr"]["L_F"] == r["cr"]["L_T"] == 1500                # full length for Alt 2
+    assert r["lambda_bar"] > 0.2 and r["chi"] < 1
+    assert r["A_eff_test"] > r["R_k"] / 350                         # area adjusted
+    assert r["A_eff_test"] == pytest.approx(r["eff"]["A_eff"], rel=1e-6)
+    assert r["N_b_Rd"] == pytest.approx(r["R_k"] / 1.0)             # N_b,Rd = R_k / γ_M0

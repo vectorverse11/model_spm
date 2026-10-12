@@ -25,7 +25,7 @@ flexural and torsional-flexural buckling of the stub.
 3. Failure load
        N_cr from flexural (L_F) and torsional / torsional-flexural (L_T) buckling
            Alternative 1: L_F = b (between bearings),  L_T = c/2
-           Alternative 2: L_F = L_T = c/2
+           Alternative 2: L_F = L_T = c (full cold-formed length; the c/2 rule is not used)
        lambda_bar = sqrt(A_eff f_y / N_cr),  chi from buckling curve b (alpha = 0.34),
        chi = 1 when lambda_bar <= 0.2
        Alternative 1 (ball bearings): load position between the gross and the net centroid;
@@ -244,7 +244,7 @@ def chi_of(lam_bar: float) -> float:
 def critical_loads(inp: StubInputs) -> Dict[str, float]:
     g = gross_properties(inp)
     b = buckling_length_b(inp)
-    L_F, L_T = (b, inp.c / 2.0) if inp.alternative == 1 else (inp.c / 2.0, inp.c / 2.0)
+    L_F, L_T = (b, inp.c / 2.0) if inp.alternative == 1 else (inp.c, inp.c)
     Nx = pi**2 * E * g["Ix"] / L_F**2                 # bending about x (symmetry axis)
     Ny = pi**2 * E * g["Iy"] / L_F**2                 # bending about y (parallel to web)
     NT = (G * g["J"] + pi**2 * E * g["Iw"] / L_T**2) / g["i0_sq"]

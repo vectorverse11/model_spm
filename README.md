@@ -105,7 +105,7 @@ buckling and perforations, with EN 1993-1-1 §6.3.1 / EN 1993-1-3 §6.2.3 for bu
 3. Effective widths: λ_p = (b/t)/(28.4·ε·√k_σ), with ρ = (λ_p − 0.22)/λ_p² for internal plates and (λ_p − 0.188)/λ_p² for outstands. Holes are removed where they overlap the effective strips.
 4. Buckling: the lengths depend on the arrangement.
    * Alternative 1: L_F = b = c + 2(cap t + base t) and L_T = c/2.
-   * Alternative 2: L_F = L_T = c/2.
+   * Alternative 2: L_F = L_T = c (full cold-formed length).
    * Then λ̄ = √(A_eff·f_y/N_cr) and χ from curve b.
 5. Failure load:
    * Alternative 1: N_u = 1/(1/(χ·A_eff·f_y) + |e|/(W_eff·f_y)). The load position is swept between the gross and net centroids for the maximum.
