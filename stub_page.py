@@ -88,12 +88,23 @@ with m1.container(border=True):
 
 with m2.container(border=True):
     st.markdown("**Test**")
-    alt = st.radio("Test arrangement", [1, 2], horizontal=True, key="s_alt",
+    alt = st.radio("Test arrangement / method", [1, 2, 3], key="s_alt",
                    format_func=lambda a: {1: "Alternative 1 — ball bearings",
-                                          2: "Alternative 2 — clamped platen"}[a])
+                                          2: "Alternative 2 — clamped platen",
+                                          3: "Alternative 3 — CUFSM + DSM (finite strip + "
+                                             "Direct Strength Method)"}[a])
     st.caption("Alt 1: flexural buckling length = b, torsional = c/2; load position between "
                "the gross and net centroid, adjusted for the maximum failure load.  \n"
-               "Alt 2: flexural and torsional buckling lengths = c (full length); concentric load.")
+               "Alt 2: flexural and torsional buckling lengths = c (full length); concentric load.  \n"
+               "Alt 3: finite strip signature curve gives the local (and distortional) buckling "
+               "stress; Direct Strength Method (AISI S100, with holes) gives the strength; "
+               "global lengths = c; concentric load.")
+    dist = False
+    if alt == 3:
+        dist = st.checkbox("Include distortional buckling in the strength (DSM P_nd)",
+                           key="s_dist",
+                           help="EN 15512 says the stub column test is not used to observe "
+                                "distortional buckling. Tick to let DSM P_nd govern if lower.")
     least = num("Dial gauge least count (mm/div)", "s_least", fmt="%.4f")
     inc = num("Load increment per step (kN)", "s_inc", fmt="%.3f")
 
@@ -106,9 +117,12 @@ if go:
         inp = StubInputs(W=W, D=D, t=t, lip=lip, pitch=pitch, n_web=int(n_web), d_web=d_web,
                          n_fl=int(n_fl), d_fl=d_fl, c=c, cap_L=cap_L, cap_W=cap_W, cap_t=cap_t,
                          base_L=base_L, base_W=base_W, base_t=base_t, fy=fy, gamma_M0=gamma,
-                         alternative=alt, least_count=least)
+                         alternative=alt, least_count=least, distortional=dist)
         try:
-            st.session_state["stub"] = {"res": run(inp, inc), "inp": inp, "inc": inc,
+            with st.spinner("Running the virtual test" +
+                            (" (finite strip analysis)…" if alt == 3 else "…")):
+                res = run(inp, inc)
+            st.session_state["stub"] = {"res": res, "inp": inp, "inc": inc,
                                         "client": client, "grade": grade}
         except ValueError as exc:
             st.session_state.pop("stub", None)
@@ -196,19 +210,45 @@ calc(f"""
   i_0² = {g['i0_sq']:.2f} mm²
 """)
 
-st.markdown("**3 · Effective widths at f_y (EN 1993-1-5 §4.4, uniform compression)**")
-st.caption("λ_p = (b/t) / (28.4·ε·√k_σ), ε = √(235/f_y) · internal: ρ = (λ_p − 0.22)/λ_p² · "
-           "outstand: ρ = (λ_p − 0.188)/λ_p² · holes removed only where they overlap the "
-           "effective strips")
-st.dataframe(pd.DataFrame([{
-    "Element": f"{e['name']} (×{e['count']})", "b (mm)": round(e["b"], 3),
-    "Type": "internal" if e["internal"] else "outstand", "k_σ": e["k"],
-    "λ_p": round(e["lambda_p"], 4), "ρ": round(e["rho"], 4),
-    "holes (mm)": e["hole"], "b_eff (mm)": round(e["b_eff"], 3)} for e in eff["elements"]]),
-    hide_index=True, width="stretch")
-calc(f"A_eff = t × Σ b_eff = **{eff['A_eff']:.2f} mm²** · x_eff = **{eff['x_eff']:.3f} mm** · "
-     f"W_eff = I_eff / c_max = {eff['I_eff']:,.0f} / {max(eff['x_eff'], b['flange'] - eff['x_eff']):.3f}"
-     f" = **{eff['W_eff']:,.1f} mm³** · Q = A_eff / A_g = **{r['Q']:.3f}**")
+dsm = r.get("dsm")
+if dsm is None:
+    st.markdown("**3 · Effective widths at f_y (EN 1993-1-5 §4.4, uniform compression)**")
+    st.caption("λ_p = (b/t) / (28.4·ε·√k_σ), ε = √(235/f_y) · internal: ρ = (λ_p − 0.22)/λ_p² · "
+               "outstand: ρ = (λ_p − 0.188)/λ_p² · holes removed only where they overlap the "
+               "effective strips")
+    st.dataframe(pd.DataFrame([{
+        "Element": f"{e['name']} (×{e['count']})", "b (mm)": round(e["b"], 3),
+        "Type": "internal" if e["internal"] else "outstand", "k_σ": e["k"],
+        "λ_p": round(e["lambda_p"], 4), "ρ": round(e["rho"], 4),
+        "holes (mm)": e["hole"], "b_eff (mm)": round(e["b_eff"], 3)} for e in eff["elements"]]),
+        hide_index=True, width="stretch")
+    calc(f"A_eff = t × Σ b_eff = **{eff['A_eff']:.2f} mm²** · x_eff = **{eff['x_eff']:.3f} mm** · "
+         f"W_eff = I_eff / c_max = {eff['I_eff']:,.0f} / {max(eff['x_eff'], b['flange'] - eff['x_eff']):.3f}"
+         f" = **{eff['W_eff']:,.1f} mm³** · Q = A_eff / A_g = **{r['Q']:.3f}**")
+else:
+    st.markdown("**3 · Finite strip analysis (CUFSM method) — signature curve**")
+    fig3, ax3 = plt.subplots(figsize=(9, 3.6))
+    ax3.semilogx(dsm["lengths"], dsm["sigma"], "-", color="#1f77b4", lw=1.8)
+    ax3.plot(dsm["local"]["a"], dsm["local"]["sigma"], "o", color="#d62728",
+             label=f"Local: σ_crl = {dsm['local']['sigma']:.1f} N/mm² at {dsm['local']['a']:.0f} mm")
+    if dsm["dist"]:
+        ax3.plot(dsm["dist"]["a"], dsm["dist"]["sigma"], "s", color="#2ca02c",
+                 label=f"Distortional: σ_crd = {dsm['dist']['sigma']:.1f} N/mm² at "
+                       f"{dsm['dist']['a']:.0f} mm")
+    ax3.axhline(inp.fy, color="grey", lw=0.8, ls=":", label=f"f_y = {inp.fy:g}")
+    ax3.set(xlabel="Half-wavelength (mm)", ylabel="Buckling stress σ_cr (N/mm²)",
+            ylim=(0, min(max(dsm["sigma"]) * 1.05, 4 * max(inp.fy, dsm["local"]["sigma"]))))
+    ax3.grid(alpha=0.3, which="both")
+    ax3.legend(fontsize=8)
+    st.pyplot(fig3)
+    st.caption(f"{dsm['n_strips']} strips, {dsm['n_nodes']} nodes · each strip: linear membrane + "
+               "cubic bending shape across, one sine half-wave along · K φ = λ K_g φ at each "
+               "half-wavelength · first minimum = local, next minimum = distortional")
+    calc(f"P_crl = σ_crl × A_g = {dsm['local']['sigma']:.2f} × {g['A']:.2f} = "
+         f"**{dsm['P_crl'] / 1000:.2f} kN**" + (
+             f" · P_crd = σ_crd × A_g = {dsm['dist']['sigma']:.2f} × {g['A']:.2f} = "
+             f"**{dsm['P_crd'] / 1000:.2f} kN**" if dsm["dist"] else
+             " · no distortional minimum on the curve"))
 
 st.markdown("**4 · Buckling of the stub (EN 1993-1-1 §6.3.1, EN 1993-1-3 §6.2.3)**")
 calc(f"""
@@ -218,14 +258,32 @@ calc(f"""
   **{cr['N_cr_y'] / 1000:,.1f} kN**
 * N_cr,T = (G·J + π²·E·I_w / L_T²) / i_0² = **{cr['N_cr_T'] / 1000:,.1f} kN** ·
   lowest root of the torsional-flexural equation = **{cr['N_cr_TF'] / 1000:,.1f} kN**
-* λ̄ = √(A_eff·f_y / N_cr) = √({eff['A_eff']:.2f} × {inp.fy:g} / {cr['N_cr']:,.0f}) =
+""" + ("" if dsm else f"""* λ̄ = √(A_eff·f_y / N_cr) = √({eff['A_eff']:.2f} × {inp.fy:g} / {cr['N_cr']:,.0f}) =
   **{r['lambda_bar']:.4f}** → χ = **{r['chi']:.4f}** (curve b, α = {ALPHA_B};
   χ = 1 when λ̄ ≤ 0.2)
 * N_c = χ·A_eff·f_y = {r['chi']:.4f} × {eff['A_eff']:.2f} × {inp.fy:g} = **{r['N_c'] / 1000:.2f} kN**
-""")
+"""))
 
 st.markdown("**5 · Failure load**")
-if inp.alternative == 1:
+if dsm:
+    fmt = lambda v: "—" if v is None else f"{v / 1000:,.2f}"
+    calc(f"""
+* **Global** (P_cre = N_cr above): λ_c = √(P_y / P_cre) = √({dsm['P_y'] / 1000:.2f} /
+  {dsm['P_cre'] / 1000:,.1f}) = **{dsm['lam_c']:.4f}** → P_ne = 0.658^(λ_c²)·P_y
+  (0.877/λ_c²·P_y if λ_c > 1.5), ≤ P_ynet = A_net·f_y = {dsm['P_ynet'] / 1000:.2f} →
+  **P_ne = {dsm['P_ne'] / 1000:.2f} kN**
+* **Local**: λ_l = √(P_ne / P_crl) = √({dsm['P_ne'] / 1000:.2f} / {dsm['P_crl'] / 1000:.2f}) =
+  **{dsm['lam_l']:.4f}** → P_nl = P_ne if λ_l ≤ 0.776, else
+  [1 − 0.15(P_crl/P_ne)^0.4](P_crl/P_ne)^0.4·P_ne, ≤ P_ynet → **P_nl = {dsm['P_nl'] / 1000:.2f} kN**
+* **Distortional**: λ_d = √(P_y / P_crd) = {'—' if dsm['lam_d'] is None else f"{dsm['lam_d']:.4f}"}
+  → P_nd = **{fmt(dsm['P_nd'])} kN** (net-section form for members with holes)
+  {'— **included**' if dsm['distortional_used'] else '— not included (stub test excludes distortional buckling)'}
+* **P_n = {'min(P_nl, P_nd)' if dsm['distortional_used'] else 'P_nl'} = {dsm['P_n'] / 1000:.2f} kN**
+  (governed by {dsm['governs']} buckling) → N_u = **{r['N_u'] / 1000:.2f} kN**
+""")
+    st.caption("P_y = A_g·f_y = " f"{dsm['P_y'] / 1000:.2f} kN · DSM: AISI S100 (Direct Strength "
+               "Method) · Q = R_k / (A_g·f_y)")
+elif inp.alternative == 1:
     calc(f"""
 * Load position swept from the gross centroid (x = {r['x_gross']:.3f} mm) to the net centroid
   (x = {r['x_net']:.3f} mm); maximum at x = **{r['x_load']:.3f} mm**
@@ -236,13 +294,19 @@ if inp.alternative == 1:
 """)
 else:
     calc(f"* Concentric load (platen clamped): N_u = N_c = **{r['N_u'] / 1000:.2f} kN**")
-calc(f"* Proof load = σ at first local buckling × A_net = **{r['N_proof'] / 1000:.2f} kN**")
+if dsm:
+    calc(f"* Proof load = 0.776² × σ_crl × A_net (where the DSM local curve starts to drop) = "
+         f"**{r['N_proof'] / 1000:.2f} kN**")
+else:
+    calc(f"* Proof load = σ at first local buckling × A_net = **{r['N_proof'] / 1000:.2f} kN**")
 
 with st.expander("How the load – dial curve is built"):
     st.markdown(f"""
 * Load rises from 0 in {S['inc']} kN steps up to the failure load.
 * At each load N the edge stress σ = N / A_eff(σ) is found by iteration; A_eff falls once the
   plates buckle locally, so the curve bends over.
+* Alternative 3: A_eff(σ) = A_g × DSM local ratio [1 − 0.15(σ_crl/σ)^0.4](σ_crl/σ)^0.4
+  (1 below λ = 0.776), capped at A_net.
 * Shortening δ = N·c / (E·A_eff(σ)) and dial reading = δ / {inp.least_count:g} mm per div.
 """)
 

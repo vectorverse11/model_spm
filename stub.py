@@ -32,6 +32,10 @@ flexural and torsional-flexural buckling of the stub.
            e = x_load - x_eff,  N_u = 1 / (1/(chi A_eff f_y) + |e| / (W_eff f_y)).
            The position is swept to give the maximum failure load.
        Alternative 2 (clamped platen): concentric, N_u = chi A_eff f_y.
+       Alternative 3 (CUFSM + DSM): finite strip signature curve -> sigma_crl (and sigma_crd);
+           Direct Strength Method (AISI S100) with net-section caps:
+           P_ne (global, L = c), P_nl (local), P_nd (distortional, optional);
+           P_n = P_nl  or  min(P_nl, P_nd).  Concentric load.
 
 4. Load - shortening (load in steps from 0 kN up to the failure load)
        sigma = N / A_eff(sigma) (edge stress, iterated),  delta = N c / (E A_eff(sigma))
@@ -48,6 +52,8 @@ from math import pi, sqrt
 from typing import Dict, List, Tuple
 
 import numpy as np
+
+import fsm
 
 E = 210000.0                    # N/mm^2
 NU = 0.3
@@ -75,8 +81,9 @@ class StubInputs:
     base_t: float       # base plate thickness, mm
     fy: float           # yield stress, N/mm^2
     gamma_M0: float     # partial factor
-    alternative: int    # 1 = ball bearings, 2 = clamped platen
+    alternative: int    # 1 = ball bearings, 2 = clamped platen, 3 = CUFSM + DSM
     least_count: float  # dial gauge, mm per division
+    distortional: bool = False  # Alternative 3: include DSM distortional strength
 
 
 # ------------------------------------------------------------------ geometry
@@ -244,7 +251,7 @@ def chi_of(lam_bar: float) -> float:
 def critical_loads(inp: StubInputs) -> Dict[str, float]:
     g = gross_properties(inp)
     b = buckling_length_b(inp)
-    L_F, L_T = (b, inp.c / 2.0) if inp.alternative == 1 else (inp.c, inp.c)
+    L_F, L_T = (b, inp.c / 2.0) if inp.alternative == 1 else (inp.c, inp.c)   # Alt 2 and 3: c
     Nx = pi**2 * E * g["Ix"] / L_F**2                 # bending about x (symmetry axis)
     Ny = pi**2 * E * g["Iy"] / L_F**2                 # bending about y (parallel to web)
     NT = (G * g["J"] + pi**2 * E * g["Iw"] / L_T**2) / g["i0_sq"]
@@ -284,6 +291,73 @@ def specimen_checks(inp: StubInputs) -> List[Dict]:
     ]
 
 
+# ------------------------------------------------- Alternative 3: CUFSM + DSM
+
+def dsm_ratio(sigma: float, sigma_crl: float) -> float:
+    """DSM local curve used as an effective-area ratio at stress sigma (A_eff / A_g)."""
+    lam = sqrt(max(sigma, 1e-9) / sigma_crl)
+    if lam <= 0.776:
+        return 1.0
+    r = (sigma_crl / sigma) ** 0.4
+    return (1 - 0.15 * r) * r
+
+
+def dsm_analysis(inp: StubInputs, cr: Dict, g: Dict, A_net: float) -> Dict:
+    """Finite strip signature curve + Direct Strength Method (AISI S100, members with holes)."""
+    b = widths(inp)
+    nodes_, strips = fsm.mesh(nodes(inp), max_strip=min(5.0, max(b.values()) / 4))
+    lengths = np.logspace(np.log10(max(5.0, 2 * inp.t)), np.log10(max(3000.0, 10 * inp.c)), 70)
+    sig = fsm.signature_curve(nodes_, strips, inp.t, E, NU, lengths)
+    mins = fsm.curve_minima(lengths, sig)
+    if mins:
+        local = mins[0]
+    else:                                               # no clear minimum: lowest short wave
+        bmax = max(b.values())
+        k = int(np.argmin(np.where(lengths <= 2 * bmax, sig, np.inf)))
+        local = {"a": float(lengths[k]), "sigma": float(sig[k])}
+    dist = mins[1] if len(mins) > 1 else None
+
+    A, fy = g["A"], inp.fy
+    P_y, P_ynet = A * fy, A_net * fy
+    # global (flexural / torsional / torsional-flexural, L = c)
+    P_cre = cr["N_cr"]
+    lam_c = sqrt(P_y / P_cre)
+    P_ne = (0.658 ** (lam_c**2) if lam_c <= 1.5 else 0.877 / lam_c**2) * P_y
+    P_ne = min(P_ne, P_ynet)
+    # local
+    P_crl = local["sigma"] * A
+    lam_l = sqrt(P_ne / P_crl)
+    if lam_l <= 0.776:
+        P_nl = P_ne
+    else:
+        r = (P_crl / P_ne) ** 0.4
+        P_nl = (1 - 0.15 * r) * r * P_ne
+    P_nl = min(P_nl, P_ynet)
+    # distortional (net-section modification for holes)
+    P_crd = dist["sigma"] * A if dist else None
+    P_nd = lam_d = None
+    if P_crd:
+        lam_d = sqrt(P_y / P_crd)
+        lam_d1 = 0.561 * (P_ynet / P_y)
+        lam_d2 = 0.561 * (14 * (P_y / P_ynet) ** 0.4 - 13)
+        if lam_d <= lam_d1:
+            P_nd = P_ynet
+        elif lam_d <= lam_d2:
+            P_d2 = (1 - 0.25 * (1 / lam_d2) ** 1.2) * (1 / lam_d2) ** 1.2 * P_y
+            P_nd = P_ynet - (P_ynet - P_d2) / (lam_d2 - lam_d1) * (lam_d - lam_d1)
+        else:
+            r = (P_crd / P_y) ** 0.6
+            P_nd = (1 - 0.25 * r) * r * P_y
+    use_d = inp.distortional and P_nd is not None
+    P_n = min(P_nl, P_nd) if use_d else P_nl
+    return {"lengths": lengths, "sigma": sig, "local": local, "dist": dist,
+            "n_nodes": len(nodes_), "n_strips": len(strips),
+            "P_y": P_y, "P_ynet": P_ynet, "P_cre": P_cre, "lam_c": lam_c, "P_ne": P_ne,
+            "P_crl": P_crl, "lam_l": lam_l, "P_nl": P_nl,
+            "P_crd": P_crd, "lam_d": lam_d, "P_nd": P_nd, "distortional_used": use_d,
+            "P_n": P_n, "governs": "distortional" if use_d and P_nd < P_nl else "local"}
+
+
 def failure_load(inp: StubInputs) -> Dict:
     eff = effective_section(inp, inp.fy)
     cr = critical_loads(inp)
@@ -292,7 +366,13 @@ def failure_load(inp: StubInputs) -> Dict:
     N_c = chi * eff["A_eff"] * inp.fy
     g = gross_properties(inp)
     A_net, x_net, _ = net_area(inp)
-    if inp.alternative == 1:
+    dsm = None
+    if inp.alternative == 3:
+        dsm = dsm_analysis(inp, cr, g, A_net)
+        N_u = N_c = dsm["P_n"]
+        lam_bar, chi = dsm["lam_c"], dsm["P_ne"] / dsm["P_y"]
+        f, x_load, e = None, g["xc"], 0.0
+    elif inp.alternative == 1:
         best = None
         for f in np.linspace(0.0, 1.0, 101):          # gross CG (0) ... net CG (1)
             x_load = g["xc"] + f * (x_net - g["xc"])
@@ -305,7 +385,7 @@ def failure_load(inp: StubInputs) -> Dict:
         N_u, f, x_load, e = N_c, None, eff["x_eff"], 0.0
     return {"N_u": N_u, "N_c": N_c, "chi": chi, "lambda_bar": lam_bar, "eff": eff,
             "cr": cr, "load_fraction": f, "x_load": x_load, "e": e,
-            "x_gross": g["xc"], "x_net": x_net, "A_net": A_net, "gross": g}
+            "x_gross": g["xc"], "x_net": x_net, "A_net": A_net, "gross": g, "dsm": dsm}
 
 
 def proof_stress(inp: StubInputs) -> float:
@@ -318,10 +398,15 @@ def proof_stress(inp: StubInputs) -> float:
     return min(s)
 
 
-def _A_eff_at_load(inp: StubInputs, N: float) -> float:
+def _A_eff_at_load(inp: StubInputs, N: float, dsm: Dict = None) -> float:
     A = net_area(inp)[0]
     for _ in range(100):
-        A_new = effective_section(inp, min(N / A, inp.fy))["A_eff"]
+        sigma = min(N / A, inp.fy)
+        if dsm is not None:                           # Alternative 3: DSM local curve
+            A_new = min(dsm_ratio(sigma, dsm["local"]["sigma"]) * gross_properties(inp)["A"],
+                        net_area(inp)[0])
+        else:
+            A_new = effective_section(inp, sigma)["A_eff"]
         if abs(A_new - A) < 1e-9:
             break
         A = A_new
@@ -365,13 +450,17 @@ def run(inp: StubInputs, increment_kN: float) -> Dict:
         loads.pop()
     rows = []
     for N in loads:
-        A = _A_eff_at_load(inp, N)
+        A = _A_eff_at_load(inp, N, fl["dsm"])
         delta = N * inp.c / (E * A)                   # strain = edge stress / E
         rows.append({"N": N, "A_eff": A, "sigma": N / A, "delta": delta,
                      "dial": delta / inp.least_count})
 
     A_net = fl["A_net"]
-    N_pr = min(proof_stress(inp) * A_net, N_u)
+    if fl["dsm"] is not None:                         # DSM local curve leaves 1 at λ_l = 0.776
+        s_pr = min(0.776**2 * fl["dsm"]["local"]["sigma"], inp.fy)
+    else:
+        s_pr = proof_stress(inp)
+    N_pr = min(s_pr * A_net, N_u)
     d_pr = next(r["dial"] for r in rows if r["N"] >= N_pr - 1e-9)
     d_u = rows[-1]["dial"]
     slopes = {"Slope1": N_pr / 1000 / d_pr if d_pr else float("nan"),
@@ -381,4 +470,5 @@ def run(inp: StubInputs, increment_kN: float) -> Dict:
     return {**fl, "rows": rows, "N_proof": N_pr, "dial_proof": d_pr, "slopes": slopes,
             "R_k": N_u, "A_eff_test": A_eff_test, "lambda_test": lam_test,
             "N_b_Rd": N_u / inp.gamma_M0, "b": buckling_length_b(inp),
-            "checks": specimen_checks(inp), "widths": b, "Q": fl["eff"]["A_eff"] / fl["gross"]["A"]}
+            "checks": specimen_checks(inp), "widths": b,
+            "Q": (N_u / inp.fy if fl["dsm"] is not None else fl["eff"]["A_eff"]) / fl["gross"]["A"]}
