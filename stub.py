@@ -49,7 +49,7 @@ flexural and torsional-flexural buckling of the stub.
 
 from dataclasses import dataclass
 from math import pi, sqrt
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -84,6 +84,7 @@ class StubInputs:
     alternative: int    # 1 = ball bearings, 2 = clamped platen, 3 = CUFSM + DSM
     least_count: float  # dial gauge, mm per division
     distortional: bool = False  # Alternative 3: include DSM distortional strength
+    cg_x: Optional[float] = None  # user CG (mm from web centreline); None = standard formula
 
 
 # ------------------------------------------------------------------ geometry
@@ -366,26 +367,28 @@ def failure_load(inp: StubInputs) -> Dict:
     N_c = chi * eff["A_eff"] * inp.fy
     g = gross_properties(inp)
     A_net, x_net, _ = net_area(inp)
+    x_cg = g["xc"] if inp.cg_x is None else inp.cg_x  # CG used for the load position
     dsm = None
     if inp.alternative == 3:
         dsm = dsm_analysis(inp, cr, g, A_net)
         N_u = N_c = dsm["P_n"]
         lam_bar, chi = dsm["lam_c"], dsm["P_ne"] / dsm["P_y"]
-        f, x_load, e = None, g["xc"], 0.0
+        f, x_load, e = None, x_cg, 0.0
     elif inp.alternative == 1:
         best = None
         for f in np.linspace(0.0, 1.0, 101):          # gross CG (0) ... net CG (1)
-            x_load = g["xc"] + f * (x_net - g["xc"])
+            x_load = x_cg + f * (x_net - x_cg)
             e = x_load - eff["x_eff"]
             N_u = 1.0 / (1.0 / N_c + abs(e) / (eff["W_eff"] * inp.fy))
             if best is None or N_u > best[0]:
                 best = (N_u, f, x_load, e)
         N_u, f, x_load, e = best
     else:
-        N_u, f, x_load, e = N_c, None, eff["x_eff"], 0.0
+        N_u, f, x_load, e = N_c, None, x_cg, 0.0
     return {"N_u": N_u, "N_c": N_c, "chi": chi, "lambda_bar": lam_bar, "eff": eff,
             "cr": cr, "load_fraction": f, "x_load": x_load, "e": e,
-            "x_gross": g["xc"], "x_net": x_net, "A_net": A_net, "gross": g, "dsm": dsm}
+            "x_gross": g["xc"], "x_cg": x_cg, "cg_custom": inp.cg_x is not None,
+            "x_net": x_net, "A_net": A_net, "gross": g, "dsm": dsm}
 
 
 def proof_stress(inp: StubInputs) -> float:
@@ -472,3 +475,45 @@ def run(inp: StubInputs, increment_kN: float) -> Dict:
             "N_b_Rd": N_u / inp.gamma_M0, "b": buckling_length_b(inp),
             "checks": specimen_checks(inp), "widths": b,
             "Q": (N_u / inp.fy if fl["dsm"] is not None else fl["eff"]["A_eff"]) / fl["gross"]["A"]}
+
+
+# ------------------------------------------------- eccentric load (secant formula)
+
+def eccentric_test(inp: StubInputs, res: Dict, e: float, increment_kN: float) -> Dict:
+    """Load applied at eccentricity e (mm) from the CG along the symmetry axis.
+
+    Mid-height lateral deflection (pin-ended, secant formula):
+        w = e · [sec(π/2 · √(N / N_cr)) − 1],   N_cr = π²·E·I / L_F²  (bending about the axis
+        parallel to the web)
+    Failure when  N / N_c + N·e·sec(π/2·√(N/N_cr)) / (W_eff·f_y) = 1   (N_c from the chosen
+    alternative, W_eff from the effective section).
+    """
+    e = abs(e)
+    N_c, N_cr = res["N_c"], res["cr"]["N_cr_y"]
+    W, fy = res["eff"]["W_eff"], inp.fy
+
+    def amp(N):
+        return 1.0 / np.cos(pi / 2 * sqrt(N / N_cr))
+
+    def U(N):
+        return N / N_c + N * e * amp(N) / (W * fy)
+
+    lo, hi = 0.0, min(N_c, 0.999 * N_cr)
+    if U(hi) <= 1:
+        N_ue = hi
+    else:
+        for _ in range(200):
+            mid = 0.5 * (lo + hi)
+            lo, hi = (mid, hi) if U(mid) < 1 else (lo, mid)
+        N_ue = lo
+    inc = increment_kN * 1000.0
+    loads = [i * inc for i in range(int(N_ue / inc - 1e-9) + 1)] + [N_ue]
+    if len(loads) > 1 and abs(loads[-1] - loads[-2]) < 1e-9:
+        loads.pop()
+    rows = []
+    for N in loads:
+        A = _A_eff_at_load(inp, N, res.get("dsm"))
+        rows.append({"N": N, "w": e * (amp(N) - 1.0), "delta": N * inp.c / (E * A),
+                     "M": N * e * amp(N)})
+    return {"e": e, "N_ue": N_ue, "N_c": N_c, "N_cr": N_cr, "W_eff": W, "rows": rows,
+            "ratio": N_ue / res["N_u"]}

@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 
 import catalog
-from stub import E, G, NU, ALPHA_B, StubInputs, buckling_length_b, run
+from stub import E, G, NU, ALPHA_B, StubInputs, eccentric_test, nodes, run
 
 st.title("🧱 Stub Column Compression Test — Virtual")
 st.caption("EN 15512 Annex A.2.1 · Effective Width Method (EN 1993-1-3 / EN 1993-1-5) · "
@@ -49,6 +49,19 @@ with c1.container(border=True):
     t = num("Thickness t (mm)", "s_t")
     lip = num("Lip length (mm) — 0 if no lip", "s_lip", allow_zero=True)
     c = num("Length c — cold-formed section (mm)", "s_c")
+    st.markdown("**Centre of Gravity (CG)**")
+    cg_mode = st.radio("CG", ["Calculate (standard formula)", "Customize"], key="s_cgmode",
+                       horizontal=True, label_visibility="collapsed")
+    cg_x = None
+    if cg_mode == "Customize":
+        cg_x = num("CG distance y_CG from the web centreline (mm)", "s_cg")
+    elif W and D and t and lip is not None:
+        bw, bf = W - t, (D - t if lip > 0 else D - t / 2)
+        bl = lip - t / 2 if lip > 0 else 0.0
+        if min(bw, bf) > 0:
+            st.markdown(f"y_CG = b_f(b_f + 2b_l) / (b_w + 2b_f + 2b_l) = {bf:g} × ({bf:g} + 2 × "
+                        f"{bl:g}) / ({bw:g} + 2 × {bf:g} + 2 × {bl:g}) = "
+                        f"**{bf * (bf + 2 * bl) / (bw + 2 * bf + 2 * bl):.3f} mm**")
 
 with c2.container(border=True):
     st.markdown("**Perforations**")
@@ -62,14 +75,16 @@ with c3.container(border=True):
     pc = st.columns(2)
     with pc[0]:
         st.markdown("**Cap Plate (a)**")
-        cap_L = num("Cap length (mm)", "s_capL")
         cap_W = num("Cap width (mm)", "s_capW")
         cap_t = num("Cap thickness (mm)", "s_capt")
     with pc[1]:
-        st.markdown("**Base Plate (a)**")
-        base_L = num("Base length (mm)", "s_baseL")
+        st.markdown("**Base Plate (b)**")
         base_W = num("Base width (mm)", "s_baseW")
         base_t = num("Base thickness (mm)", "s_baset")
+    cap_L = base_L = W + 2 * base_t if W and base_t else None
+    if cap_L:
+        st.markdown(f"**Cap Depth = Base Depth** = W + 2 × base thickness = {W:g} + 2 × "
+                    f"{base_t:g} = **{cap_L:g} mm**")
     if c and cap_t and base_t:
         st.markdown(f"Buckling length **b** = c + 2 × (cap t + base t) = {c:g} + 2 × "
                     f"({cap_t:g} + {base_t:g}) = **{c + 2 * (cap_t + base_t):g} mm**")
@@ -77,12 +92,16 @@ with c3.container(border=True):
 m1, m2 = st.columns(2)
 with m1.container(border=True):
     st.markdown("**Material**")
-    grade = st.selectbox("IS 2062 grade (reference)", list(catalog.IS2062_MECHANICAL),
-                         key="s_grade")
-    ref = next(iter(catalog.IS2062_MECHANICAL[grade].values()))
-    st.caption(f"IS 2062 {grade}: ReH = {ref['ReH <20']} MPa (< 20 mm), Rm = {ref['Rm']} MPa. "
-               "Enter the yield stress to use below.")
-    fy = num("Yield stress f_y (N/mm²)", "s_fy")
+    grade = st.selectbox("Grade Designation (IS 2062 : 2011)",
+                         list(catalog.STEEL_GRADES) + ["Customize..."], key="s_grade")
+    if grade == "Customize...":
+        fy = num("Yield stress f_y (N/mm²)", "s_fy")
+    else:
+        ref = catalog.STEEL_GRADES[grade]
+        fy = float(catalog.grade_yield(grade, t if t else 0.0))
+        st.markdown(f"Yield stress **f_y = {fy:g} N/mm²** (ReH for t "
+                    f"{'< 20 mm' if not t or t < 20 else ('20–40 mm' if t <= 40 else '> 40 mm')})"
+                    f" · Rm = {ref['Rm']} N/mm² · elongation {ref['A %']} %")
     gamma = num("γ_M0", "s_gamma", fmt="%.2f")
     st.caption(f"Fixed: E = {E:,.0f} N/mm² · G = {G:,.0f} N/mm² · ν = {NU}")
 
@@ -105,6 +124,9 @@ with m2.container(border=True):
                            key="s_dist",
                            help="EN 15512 says the stub column test is not used to observe "
                                 "distortional buckling. Tick to let DSM P_nd govern if lower.")
+    ecc = st.number_input("Eccentricity e of the load from the CG (mm) — for the eccentric "
+                          "load curve", min_value=0.0, value=None, key="s_ecc", format="%.2f",
+                          placeholder="enter when the eccentricity factor is known")
     least = num("Dial gauge least count (mm/div)", "s_least", fmt="%.4f")
     inc = num("Load increment per step (kN)", "s_inc", fmt="%.3f")
 
@@ -117,12 +139,13 @@ if go:
         inp = StubInputs(W=W, D=D, t=t, lip=lip, pitch=pitch, n_web=int(n_web), d_web=d_web,
                          n_fl=int(n_fl), d_fl=d_fl, c=c, cap_L=cap_L, cap_W=cap_W, cap_t=cap_t,
                          base_L=base_L, base_W=base_W, base_t=base_t, fy=fy, gamma_M0=gamma,
-                         alternative=alt, least_count=least, distortional=dist)
+                         alternative=alt, least_count=least, distortional=dist, cg_x=cg_x)
         try:
             with st.spinner("Running the virtual test" +
                             (" (finite strip analysis)…" if alt == 3 else "…")):
                 res = run(inp, inc)
-            st.session_state["stub"] = {"res": res, "inp": inp, "inc": inc,
+                ecc_res = eccentric_test(inp, res, ecc, inc) if ecc else None
+            st.session_state["stub"] = {"res": res, "inp": inp, "inc": inc, "ecc": ecc_res,
                                         "client": client, "grade": grade}
         except ValueError as exc:
             st.session_state.pop("stub", None)
@@ -155,39 +178,99 @@ k[1].caption(f"A_eff = {r['R_k']:,.0f} / {inp.fy:g} = **{r['R_k'] / inp.fy:.2f} 
              + ("" if r["lambda_test"] <= 0.2 else
                 f" → λ̄ = {r['lambda_test']:.3f} > 0.2, adjusted so χ·A_eff·f_y = R_k: "
                 f"**{r['A_eff_test']:.2f} mm²**"))
-k[2].metric("N_b,Rd = R_k / γ_M0", f"{r['N_b_Rd'] / 1000:.2f} kN")
-k[2].caption(f"N_b,Rd = {r['R_k'] / 1000:.2f} / {inp.gamma_M0:g} = **{r['N_b_Rd'] / 1000:.2f} kN**")
+k[2].markdown(
+    "<div style='border:3px solid #d62728;border-radius:10px;padding:8px 14px;"
+    "background:rgba(214,39,40,0.07)'>"
+    "<div style='font-size:0.85rem'>N_b,Rd = R_k / γ_M0 &nbsp;(design capacity)</div>"
+    f"<div style='font-size:2.1rem;font-weight:700;color:#d62728'>{r['N_b_Rd'] / 1000:.2f} kN</div>"
+    f"<div style='font-size:0.8rem'>N_b,Rd = {r['R_k'] / 1000:.2f} / {inp.gamma_M0:g} = "
+    f"<b>{r['N_b_Rd'] / 1000:.2f} kN</b></div></div>", unsafe_allow_html=True)
 k[3].metric("Proof load", f"{r['N_proof'] / 1000:.2f} kN")
 k[3].caption("Load at which the first plate starts to buckle locally (end of the linear part)")
 
 # ---------------- graphs ----------------
-gcol = st.columns(2)
+def section_figure(inp, r):
+    """Upright cross-section with the y-y / z-z axes and the CG (web on the right)."""
+    P = nodes(inp)
+    xs, zs = -(P[:, 0]), P[:, 1]                     # y positive to the left (towards lips)
+    fig, ax = plt.subplots(figsize=(5, 4.6))
+    ax.plot(xs, zs, "-", color="#1f3a5f", lw=max(2.5, inp.t * 2.2), solid_capstyle="butt")
+    yc = -r["x_cg"]
+    span = max(abs(xs).max(), abs(zs).max()) * 1.35
+    ax.annotate("", xy=(yc - span * 0.75, 0), xytext=(yc + span * 0.75, 0),
+                arrowprops=dict(arrowstyle="-|>", lw=1.2, color="#333"))
+    ax.annotate("", xy=(yc + span * 0.75, 0), xytext=(yc, 0),
+                arrowprops=dict(arrowstyle="-|>", lw=1.2, color="#333"))
+    ax.annotate("", xy=(yc, span * 0.8), xytext=(yc, -span * 0.8),
+                arrowprops=dict(arrowstyle="-|>", lw=1.2, color="#333"))
+    ax.annotate("", xy=(yc, -span * 0.8), xytext=(yc, 0),
+                arrowprops=dict(arrowstyle="-|>", lw=1.2, color="#333"))
+    ax.text(yc - span * 0.78, span * 0.05, "y (+)", ha="right", fontsize=10)
+    ax.text(yc + span * 0.78, span * 0.05, "y (−)", ha="left", fontsize=10)
+    ax.text(yc + span * 0.04, span * 0.82, "z", fontsize=11)
+    ax.text(yc + span * 0.04, -span * 0.88, "z", fontsize=11)
+    ax.plot(yc, 0, "o", ms=11, mfc="none", mec="#d62728", mew=2)
+    ax.plot(yc, 0, "o", ms=3, color="#d62728")
+    ax.annotate(f"C.G.\ny_CG = {r['x_cg']:.2f} mm\n({'user value' if r['cg_custom'] else 'calculated'})",
+                xy=(yc, 0), xytext=(yc - span * 0.95, span * 0.55), fontsize=9, color="#d62728",
+                arrowprops=dict(arrowstyle="-", color="#d62728", lw=1))
+    ax.annotate("", xy=(yc, -span * 0.55), xytext=(0, -span * 0.55),
+                arrowprops=dict(arrowstyle="<->", lw=0.8, color="#d62728"))
+    ax.text(yc / 2, -span * 0.62, f"{r['x_cg']:.2f}", ha="center", fontsize=8, color="#d62728")
+    ax.text(span * 0.06, -zs.max() * 0.5, "web", rotation=90, va="center", fontsize=8,
+            color="#555")
+    ax.set_aspect("equal")
+    ax.set_xlim(yc - span, yc + span)
+    ax.set_ylim(-span, span)
+    ax.axis("off")
+    ax.set_title("Upright section — axes and CG", fontsize=10)
+    return fig
+
+
+delta = np.array([x["delta"] for x in rows])
+gcol = st.columns([3, 2])
 fig1, ax1 = plt.subplots(figsize=(7, 4.6))
-ax1.plot(dial, N_kN, "o-", ms=3, lw=1.8, color="#1f77b4")
-ax1.set(xlabel="Dial Reading in div", ylabel="Load in kN", title="Load Vs Dial Reading")
+ax1.plot(delta, N_kN, "-", lw=2, color="#1f77b4")
+ax1.plot(delta[-1], N_kN[-1], "o", color="#d62728")
+ax1.annotate(f"Failure {N_kN[-1]:.2f} kN", (delta[-1], N_kN[-1]), textcoords="offset points",
+             xytext=(-90, 8), fontsize=8, color="#d62728")
+ax1.axhline(r["N_proof"] / 1000, color="grey", lw=0.8, ls=":")
+ax1.text(delta[-1] * 0.02, r["N_proof"] / 1000, "Proof load", va="bottom", fontsize=8,
+         color="grey")
+ax1.set(xlabel="Axial displacement δ (mm)", ylabel="Axial load N (kN)",
+        title="Axial Load vs Axial Displacement", xlim=(0, delta[-1] * 1.08),
+        ylim=(0, N_kN[-1] * 1.12))
 ax1.grid(alpha=0.3)
 gcol[0].pyplot(fig1)
+gcol[1].pyplot(section_figure(inp, r))
+st.caption("δ = N·c / (E·A_eff(σ)) at each load step (see “How the curves are built”).")
 
-d_pr, N_pr, N_u = r["dial_proof"], r["N_proof"] / 1000, r["N_u"] / 1000
-sl = r["slopes"]
-fig2, ax2 = plt.subplots(figsize=(7, 4.6))
-ax2.plot(dial, N_kN, "o-", ms=3, lw=1.8, color="#1f77b4")
-xx = np.array([0, dial[-1] * 1.05])
-ax2.plot(xx, sl["Slope1"] * xx, "-", lw=1, color="#4a90d9", label=f"Slope1 = {sl['Slope1']:.3f}")
-if np.isfinite(sl["Slope2"]):
-    ax2.plot(xx, N_pr + sl["Slope2"] * (xx - d_pr), "-", lw=1, color="#7fb3e6",
-             label=f"Slope2 = {sl['Slope2']:.3f}")
-ax2.plot(xx, sl["Slope3"] * xx, "-", lw=1, color="#2c5d8f", label=f"Slope3 = {sl['Slope3']:.3f}")
-ax2.axhline(N_pr, color="grey", lw=0.8)
-ax2.text(dial[-1] * 0.02, N_pr, "Proof Load", va="bottom", fontsize=8)
-ax2.set(xlabel="Dial Reading in div", ylabel="Load in kN", title="Load Vs Dial Reading — slopes",
-        ylim=(0, N_u * 1.1), xlim=(0, dial[-1] * 1.05))
-ax2.legend(fontsize=8, loc="lower right")
-ax2.grid(alpha=0.3)
-gcol[1].pyplot(fig2)
-st.caption(f"Slope (kN/div): **Slope1** = proof load / dial at proof = {N_pr:.2f} / {d_pr:.2f} · "
-           f"**Slope2** = (failure − proof) / (dial change) · **Slope3** = failure load / dial at "
-           f"failure = {N_u:.2f} / {dial[-1]:.2f}")
+st.subheader("Eccentric Load vs Displacement")
+ec = S.get("ecc")
+if ec is None:
+    st.info("Enter the **eccentricity e** (mm from the CG) in the Test box and run the test to "
+            "generate the eccentric load curve.")
+else:
+    er = ec["rows"]
+    Ne = np.array([x["N"] for x in er]) / 1000
+    fig4, ax4 = plt.subplots(figsize=(9, 4.4))
+    ax4.plot([x["w"] for x in er], Ne, "-", lw=2, color="#d62728",
+             label="Lateral displacement at mid-height w")
+    ax4.plot([x["delta"] for x in er], Ne, "--", lw=1.6, color="#1f77b4",
+             label="Axial displacement δ")
+    ax4.axhline(ec["N_ue"] / 1000, color="grey", lw=0.8, ls=":")
+    ax4.set(xlabel="Displacement (mm)", ylabel="Eccentric load N (kN)",
+            title=f"Eccentric Load vs Displacement (e = {ec['e']:g} mm)",
+            ylim=(0, Ne[-1] * 1.12))
+    ax4.grid(alpha=0.3)
+    ax4.legend(fontsize=8, loc="lower right")
+    st.pyplot(fig4)
+    calc(f"""
+* w = e · [sec(π/2 · √(N/N_cr)) − 1], N_cr = π²·E·I_y / L_F² = **{ec['N_cr'] / 1000:,.1f} kN**
+* Failure when N / N_c + N·e·sec(π/2·√(N/N_cr)) / (W_eff·f_y) = 1 with N_c = {ec['N_c'] / 1000:.2f} kN,
+  W_eff = {ec['W_eff']:,.1f} mm³ → **eccentric failure load = {ec['N_ue'] / 1000:.2f} kN**
+  ({ec['ratio'] * 100:.1f} % of the concentric failure load)
+""")
 
 # ---------------- step by step ----------------
 st.subheader("Step-by-step")
@@ -202,7 +285,8 @@ calc(f"""
   {'D − t' if inp.lip > 0 else 'D − t/2'} = **{b['flange']:g} mm**""" + (
     f" · lip b_l = d_l − t/2 = **{b['lip']:g} mm**" if inp.lip > 0 else "") + f"""
 * Gross area A_g = t × Σb = {inp.t:g} × {sum(x['b'] * x['count'] for x in eff['elements']):g} =
-  **{g['A']:.2f} mm²** · centroid from web x_g = **{g['xc']:.3f} mm**
+  **{g['A']:.2f} mm²** · centroid from web x_g = **{g['xc']:.3f} mm** · CG used for the load
+  position y_CG = **{r['x_cg']:.3f} mm** ({'user value' if r['cg_custom'] else 'standard formula'})
 * Net (minimum) area A_net = A_g − holes = {g['A']:.2f} − ({inp.n_web} × {inp.d_web:g} + 2 ×
   {inp.n_fl} × {inp.d_fl:g}) × {inp.t:g} = **{r['A_net']:.2f} mm²** · x_net = **{r['x_net']:.3f} mm**
 * I_x = {g['Ix']:,.0f} mm⁴ · I_y = {g['Iy']:,.0f} mm⁴ · J = Σ b t³/3 = {g['J']:,.2f} mm⁴ ·
@@ -300,7 +384,7 @@ if dsm:
 else:
     calc(f"* Proof load = σ at first local buckling × A_net = **{r['N_proof'] / 1000:.2f} kN**")
 
-with st.expander("How the load – dial curve is built"):
+with st.expander("How the curves are built"):
     st.markdown(f"""
 * Load rises from 0 in {S['inc']} kN steps up to the failure load.
 * At each load N the edge stress σ = N / A_eff(σ) is found by iteration; A_eff falls once the
@@ -322,6 +406,7 @@ with st.expander("🔍 View readings", expanded=True):
 summary = pd.DataFrame([
     {"Item": "Client", "Value": S["client"]},
     {"Item": "Test arrangement", "Value": f"Alternative {inp.alternative}"},
+    {"Item": "CG y_CG from web (mm)", "Value": f"{r['x_cg']:.3f}"},
     {"Item": "A_g (mm²)", "Value": f"{g['A']:.2f}"},
     {"Item": "A_net (mm²)", "Value": f"{r['A_net']:.2f}"},
     {"Item": "A_eff at f_y (mm²)", "Value": f"{eff['A_eff']:.2f}"},
@@ -333,7 +418,9 @@ summary = pd.DataFrame([
     {"Item": "A_eff = R_k / f_y (mm²)", "Value": f"{r['A_eff_test']:.2f}"},
     {"Item": "N_b,Rd = R_k / γ_M0 (kN)", "Value": f"{r['N_b_Rd'] / 1000:.3f}"},
     {"Item": "Proof load (kN)", "Value": f"{r['N_proof'] / 1000:.3f}"},
-    *[{"Item": k_, "Value": f"{v:.4f}"} for k_, v in r["slopes"].items()],
+    *([{"Item": "Eccentricity e (mm)", "Value": f"{S['ecc']['e']:g}"},
+       {"Item": "Eccentric failure load (kN)", "Value": f"{S['ecc']['N_ue'] / 1000:.3f}"}]
+      if S.get("ecc") else []),
 ])
 d1, d2 = st.columns(2)
 d1.download_button("📥 Download readings (CSV)", table.to_csv(index=False).encode("utf-8"),

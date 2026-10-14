@@ -95,8 +95,11 @@ buckling and perforations, with EN 1993-1-1 §6.3.1 / EN 1993-1-3 §6.2.3 for bu
 
 **Inputs (all from the user):**
 * Specimen: W, D, t, lip length, length c
+* Centre of Gravity: calculated with the standard formula y_CG = b_f(b_f + 2b_l)/(b_w + 2b_f + 2b_l), or a user value
+* Grade designation (IS 2062 E 250 … E 650, f_y filled automatically from the thickness band) or Customize (f_y typed)
+* Optional eccentricity e (mm from the CG) for the eccentric load curve
 * Perforations: pitch, and the number and width of holes across the web and across each flange
-* Cap and base plates: length, width and thickness
+* Cap plate (a) and base plate (b): width and thickness. Cap Depth = Base Depth = W + 2 × base thickness (calculated)
 * f_y and γ_M0
 * Test arrangement (Alternative 1 or 2), dial least count (mm/div), load increment (kN)
 
@@ -113,4 +116,5 @@ buckling and perforations, with EN 1993-1-1 §6.3.1 / EN 1993-1-3 §6.2.3 for bu
    * Alternative 2: N_u = χ·A_eff·f_y.
    * Alternative 3 (CUFSM + DSM): the finite strip signature curve gives σ_crl (first minimum) and σ_crd (next minimum). The Direct Strength Method (AISI S100, members with holes) then gives P_ne (global, L = c), P_nl (local) and optionally P_nd (distortional), all capped at A_net·f_y. N_u = P_nl, or min(P_nl, P_nd) if distortional is ticked.
 6. Load–dial curve: σ = N/A_eff(σ), δ = N·c/(E·A_eff(σ)), and dial = δ / least count. The proof load is the load at the first local buckling.
-7. Results: R_k, A_eff = R_k/f_y (adjusted if λ̄ > 0.2), N_b,Rd = R_k/γ_M0, Q = A_eff/A_g, slopes 1–3, a readings table and CSV.
+7. Results: R_k, A_eff = R_k/f_y (adjusted if λ̄ > 0.2), N_b,Rd = R_k/γ_M0 (highlighted), Q = A_eff/A_g, a readings table and CSV.
+8. Graphs: Axial Load vs Axial Displacement (δ) beside the section diagram with the y–z axes and CG; Eccentric Load vs Displacement, where mid-height w = e·[sec(π/2·√(N/N_cr)) − 1] and failure is at N/N_c + N·e·sec(…)/(W_eff·f_y) = 1.
