@@ -85,6 +85,7 @@ class StubInputs:
     least_count: float  # dial gauge, mm per division
     distortional: bool = False  # Alternative 3: include DSM distortional strength
     cg_x: Optional[float] = None  # user CG (mm from web centreline); None = standard formula
+    half_length: bool = False     # Column Buckling Test: Alt 2 / 3 buckling lengths = c/2
 
 
 # ------------------------------------------------------------------ geometry
@@ -252,7 +253,12 @@ def chi_of(lam_bar: float) -> float:
 def critical_loads(inp: StubInputs) -> Dict[str, float]:
     g = gross_properties(inp)
     b = buckling_length_b(inp)
-    L_F, L_T = (b, inp.c / 2.0) if inp.alternative == 1 else (inp.c, inp.c)   # Alt 2 and 3: c
+    if inp.alternative == 1:
+        L_F, L_T = b, inp.c / 2.0
+    elif inp.half_length:                             # column buckling test: c/2
+        L_F, L_T = inp.c / 2.0, inp.c / 2.0
+    else:                                             # stub column test: c
+        L_F, L_T = inp.c, inp.c
     Nx = pi**2 * E * g["Ix"] / L_F**2                 # bending about x (symmetry axis)
     Ny = pi**2 * E * g["Iy"] / L_F**2                 # bending about y (parallel to web)
     NT = (G * g["J"] + pi**2 * E * g["Iw"] / L_T**2) / g["i0_sq"]
