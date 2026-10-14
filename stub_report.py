@@ -201,7 +201,7 @@ def build_report(inp, r, client, grade, cg_mode, increment, ecc=None, with_graph
     head = Table([[Paragraph(name, title)],
                   [Paragraph("Virtual compression test of a perforated rack upright · "
                              "EN 15512 Annex A.2.1"
-                             + (" · buckling lengths L1/2 (Alt. 2/3)" if column else ""), sub)]],
+                             + (" · buckling lengths L/2, L = L1 + 2a + 2b" if column else ""), sub)]],
                  colWidths=[content_w])
     head.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(NAVY)),
                               ("LEFTPADDING", (0, 0), (-1, -1), 12),
