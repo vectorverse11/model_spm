@@ -34,6 +34,31 @@ IS2062_MECHANICAL = {
     },
 }
 
+# Minimum yield stress ReH (MPa) by thickness band and tensile strength Rm for all
+# IS 2062 : 2011 grades (Table 2). Used to fill f_y automatically on the stub page.
+STEEL_GRADES = {
+    "E 250": {"Rm": 410, "ReH <20": 250, "ReH 20-40": 240, "ReH >40": 230, "A %": 23},
+    "E 275": {"Rm": 430, "ReH <20": 275, "ReH 20-40": 265, "ReH >40": 255, "A %": 22},
+    "E 300": {"Rm": 440, "ReH <20": 300, "ReH 20-40": 290, "ReH >40": 280, "A %": 22},
+    "E 350": {"Rm": 490, "ReH <20": 350, "ReH 20-40": 330, "ReH >40": 320, "A %": 22},
+    "E 410": {"Rm": 540, "ReH <20": 410, "ReH 20-40": 390, "ReH >40": 380, "A %": 20},
+    "E 450": {"Rm": 570, "ReH <20": 450, "ReH 20-40": 430, "ReH >40": 420, "A %": 20},
+    "E 550": {"Rm": 650, "ReH <20": 550, "ReH 20-40": 530, "ReH >40": 520, "A %": 12},
+    "E 600": {"Rm": 730, "ReH <20": 600, "ReH 20-40": 580, "ReH >40": 570, "A %": 12},
+    "E 650": {"Rm": 780, "ReH <20": 650, "ReH 20-40": 630, "ReH >40": 620, "A %": 12},
+}
+
+
+def grade_yield(grade: str, thickness_mm: float) -> float:
+    """ReH of an IS 2062 grade for the thickness band of t."""
+    row = STEEL_GRADES[grade]
+    if thickness_mm < 20:
+        return row["ReH <20"]
+    if thickness_mm <= 40:
+        return row["ReH 20-40"]
+    return row["ReH >40"]
+
+
 # Chemical properties (Clauses 5, 8.1 and 8.2), max %
 IS2062_CHEMICAL = {
     "E 250": {

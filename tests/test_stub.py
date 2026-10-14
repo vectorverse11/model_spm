@@ -74,3 +74,38 @@ def test_area_adjusted_when_slenderness_exceeds_0_2():
     assert r["A_eff_test"] > r["R_k"] / 350                         # area adjusted
     assert r["A_eff_test"] == pytest.approx(r["eff"]["A_eff"], rel=1e-6)
     assert r["N_b_Rd"] == pytest.approx(r["R_k"] / 1.0)             # N_b,Rd = R_k / γ_M0
+
+
+def test_custom_cg_moves_alt1_load_position():
+    r0 = run(inp(alternative=1), 1.0)
+    r1 = run(inp(alternative=1, cg_x=40.0), 1.0)
+    assert r0["x_cg"] == pytest.approx(r0["x_gross"]) and not r0["cg_custom"]
+    assert r1["x_cg"] == 40.0 and r1["cg_custom"] and r1["N_u"] != r0["N_u"]
+
+
+def test_lipped_channel_cg_closed_form():
+    from stub import gross_properties
+    g = gross_properties(inp())
+    bw, bf, bl = 108, 88, 19
+    assert g["xc"] == pytest.approx(bf * (bf + 2 * bl) / (bw + 2 * bf + 2 * bl))
+
+
+def test_eccentric_curve_secant_formula():
+    from math import cos, pi, sqrt
+    from stub import eccentric_test
+    i = inp(alternative=2)
+    r = run(i, 1.0)
+    ec = eccentric_test(i, r, 5.0, 1.0)
+    assert 0 < ec["N_ue"] < r["N_u"]
+    last = ec["rows"][-1]
+    assert last["w"] == pytest.approx(5.0 * (1 / cos(pi / 2 * sqrt(last["N"] / ec["N_cr"])) - 1))
+    U = ec["N_ue"] / ec["N_c"] + last["M"] / (ec["W_eff"] * 350)
+    assert U == pytest.approx(1.0, rel=1e-6)
+    assert eccentric_test(i, r, 0.0, 1.0)["N_ue"] == pytest.approx(r["N_u"])
+
+
+def test_grade_yield_by_thickness():
+    import catalog
+    assert catalog.grade_yield("E 350", 2.0) == 350
+    assert catalog.grade_yield("E 350", 25.0) == 330
+    assert list(catalog.STEEL_GRADES)[-1] == "E 650"
