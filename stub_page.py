@@ -12,7 +12,8 @@ import pandas as pd
 import streamlit as st
 
 import catalog
-from stub import E, G, NU, ALPHA_B, StubInputs, eccentric_test, nodes, run
+from stub import E, G, NU, ALPHA_B, StubInputs, eccentric_test, run
+from stub_report import axial_figure, build_report, section_figure
 
 st.title("🧱 Stub Column Compression Test — Virtual")
 st.caption("EN 15512 Annex A.2.1 · Effective Width Method (EN 1993-1-3 / EN 1993-1-5) · "
@@ -145,8 +146,10 @@ if go:
                             (" (finite strip analysis)…" if alt == 3 else "…")):
                 res = run(inp, inc)
                 ecc_res = eccentric_test(inp, res, ecc, inc) if ecc else None
-            st.session_state["stub"] = {"res": res, "inp": inp, "inc": inc, "ecc": ecc_res,
-                                        "client": client, "grade": grade}
+            st.session_state["stub"] = {
+                "res": res, "inp": inp, "inc": inc, "ecc": ecc_res, "client": client,
+                "grade": grade if grade != "Customize..." else "Customized f_y",
+                "cg_mode": "Standard formula" if cg_mode != "Customize" else "User value"}
         except ValueError as exc:
             st.session_state.pop("stub", None)
             st.error(str(exc))
@@ -179,69 +182,19 @@ k[1].caption(f"A_eff = {r['R_k']:,.0f} / {inp.fy:g} = **{r['R_k'] / inp.fy:.2f} 
                 f" → λ̄ = {r['lambda_test']:.3f} > 0.2, adjusted so χ·A_eff·f_y = R_k: "
                 f"**{r['A_eff_test']:.2f} mm²**"))
 k[2].markdown(
-    "<div style='border:3px solid #d62728;border-radius:10px;padding:8px 14px;"
-    "background:rgba(214,39,40,0.07)'>"
+    "<div style='border:3px solid #1e7b45;border-radius:10px;padding:8px 14px;"
+    "background:rgba(30,123,69,0.08)'>"
     "<div style='font-size:0.85rem'>N_b,Rd = R_k / γ_M0 &nbsp;(design capacity)</div>"
-    f"<div style='font-size:2.1rem;font-weight:700;color:#d62728'>{r['N_b_Rd'] / 1000:.2f} kN</div>"
+    f"<div style='font-size:2.1rem;font-weight:700;color:#1e7b45'>{r['N_b_Rd'] / 1000:.2f} kN</div>"
     f"<div style='font-size:0.8rem'>N_b,Rd = {r['R_k'] / 1000:.2f} / {inp.gamma_M0:g} = "
     f"<b>{r['N_b_Rd'] / 1000:.2f} kN</b></div></div>", unsafe_allow_html=True)
 k[3].metric("Proof load", f"{r['N_proof'] / 1000:.2f} kN")
 k[3].caption("Load at which the first plate starts to buckle locally (end of the linear part)")
 
 # ---------------- graphs ----------------
-def section_figure(inp, r):
-    """Upright cross-section with the y-y / z-z axes and the CG (web on the right)."""
-    P = nodes(inp)
-    xs, zs = -(P[:, 0]), P[:, 1]                     # y positive to the left (towards lips)
-    fig, ax = plt.subplots(figsize=(5, 4.6))
-    ax.plot(xs, zs, "-", color="#1f3a5f", lw=max(2.5, inp.t * 2.2), solid_capstyle="butt")
-    yc = -r["x_cg"]
-    span = max(abs(xs).max(), abs(zs).max()) * 1.35
-    ax.annotate("", xy=(yc - span * 0.75, 0), xytext=(yc + span * 0.75, 0),
-                arrowprops=dict(arrowstyle="-|>", lw=1.2, color="#333"))
-    ax.annotate("", xy=(yc + span * 0.75, 0), xytext=(yc, 0),
-                arrowprops=dict(arrowstyle="-|>", lw=1.2, color="#333"))
-    ax.annotate("", xy=(yc, span * 0.8), xytext=(yc, -span * 0.8),
-                arrowprops=dict(arrowstyle="-|>", lw=1.2, color="#333"))
-    ax.annotate("", xy=(yc, -span * 0.8), xytext=(yc, 0),
-                arrowprops=dict(arrowstyle="-|>", lw=1.2, color="#333"))
-    ax.text(yc - span * 0.78, span * 0.05, "y (+)", ha="right", fontsize=10)
-    ax.text(yc + span * 0.78, span * 0.05, "y (−)", ha="left", fontsize=10)
-    ax.text(yc + span * 0.04, span * 0.82, "z", fontsize=11)
-    ax.text(yc + span * 0.04, -span * 0.88, "z", fontsize=11)
-    ax.plot(yc, 0, "o", ms=11, mfc="none", mec="#d62728", mew=2)
-    ax.plot(yc, 0, "o", ms=3, color="#d62728")
-    ax.annotate(f"C.G.\ny_CG = {r['x_cg']:.2f} mm\n({'user value' if r['cg_custom'] else 'calculated'})",
-                xy=(yc, 0), xytext=(yc - span * 0.95, span * 0.55), fontsize=9, color="#d62728",
-                arrowprops=dict(arrowstyle="-", color="#d62728", lw=1))
-    ax.annotate("", xy=(yc, -span * 0.55), xytext=(0, -span * 0.55),
-                arrowprops=dict(arrowstyle="<->", lw=0.8, color="#d62728"))
-    ax.text(yc / 2, -span * 0.62, f"{r['x_cg']:.2f}", ha="center", fontsize=8, color="#d62728")
-    ax.text(span * 0.06, -zs.max() * 0.5, "web", rotation=90, va="center", fontsize=8,
-            color="#555")
-    ax.set_aspect("equal")
-    ax.set_xlim(yc - span, yc + span)
-    ax.set_ylim(-span, span)
-    ax.axis("off")
-    ax.set_title("Upright section — axes and CG", fontsize=10)
-    return fig
-
-
 delta = np.array([x["delta"] for x in rows])
 gcol = st.columns([3, 2])
-fig1, ax1 = plt.subplots(figsize=(7, 4.6))
-ax1.plot(delta, N_kN, "-", lw=2, color="#1f77b4")
-ax1.plot(delta[-1], N_kN[-1], "o", color="#d62728")
-ax1.annotate(f"Failure {N_kN[-1]:.2f} kN", (delta[-1], N_kN[-1]), textcoords="offset points",
-             xytext=(-90, 8), fontsize=8, color="#d62728")
-ax1.axhline(r["N_proof"] / 1000, color="grey", lw=0.8, ls=":")
-ax1.text(delta[-1] * 0.02, r["N_proof"] / 1000, "Proof load", va="bottom", fontsize=8,
-         color="grey")
-ax1.set(xlabel="Axial displacement δ (mm)", ylabel="Axial load N (kN)",
-        title="Axial Load vs Axial Displacement", xlim=(0, delta[-1] * 1.08),
-        ylim=(0, N_kN[-1] * 1.12))
-ax1.grid(alpha=0.3)
-gcol[0].pyplot(fig1)
+gcol[0].pyplot(axial_figure(r))
 gcol[1].pyplot(section_figure(inp, r))
 st.caption("δ = N·c / (E·A_eff(σ)) at each load step (see “How the curves are built”).")
 
@@ -427,3 +380,14 @@ d1.download_button("📥 Download readings (CSV)", table.to_csv(index=False).enc
                    "stub_column_readings.csv", "text/csv", width="stretch")
 d2.download_button("📥 Download results (CSV)", summary.to_csv(index=False).encode("utf-8"),
                    "stub_column_results.csv", "text/csv", width="stretch")
+
+st.subheader("📄 Report")
+rc = st.columns(2)
+for col, with_graph, label in ((rc[0], True, "📄 Download report with graph (PDF)"),
+                               (rc[1], False, "📄 Download report without graph (PDF)")):
+    col.download_button(
+        label, build_report(inp, r, S["client"], S.get("grade", ""),
+                            S.get("cg_mode", "Standard formula"), S["inc"], S.get("ecc"),
+                            with_graph=with_graph),
+        f"stub_column_report{'_with_graph' if with_graph else ''}.pdf", "application/pdf",
+        width="stretch", key=f"rep_{with_graph}")

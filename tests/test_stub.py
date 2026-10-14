@@ -109,3 +109,14 @@ def test_grade_yield_by_thickness():
     assert catalog.grade_yield("E 350", 2.0) == 350
     assert catalog.grade_yield("E 350", 25.0) == 330
     assert list(catalog.STEEL_GRADES)[-1] == "E 650"
+
+
+def test_pdf_report_with_and_without_graph():
+    from stub import eccentric_test
+    from stub_report import build_report
+    i = inp(alternative=2)
+    r = run(i, 1.0)
+    ec = eccentric_test(i, r, 5.0, 1.0)
+    a = build_report(i, r, "Client", "E 350", "Standard formula", 1.0, ec, with_graph=True)
+    b = build_report(i, r, "Client", "E 350", "Standard formula", 1.0, None, with_graph=False)
+    assert a[:4] == b[:4] == b"%PDF" and len(a) > len(b)
