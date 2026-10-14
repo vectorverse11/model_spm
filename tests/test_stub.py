@@ -120,3 +120,17 @@ def test_pdf_report_with_and_without_graph():
     a = build_report(i, r, "Client", "E 350", "Standard formula", 1.0, ec, with_graph=True)
     b = build_report(i, r, "Client", "E 350", "Standard formula", 1.0, None, with_graph=False)
     assert a[:4] == b[:4] == b"%PDF" and len(a) > len(b)
+
+
+def test_column_buckling_half_length():
+    from stub_report import build_report
+    s = run(inp(alternative=2, c=1200), 5.0)
+    c = run(inp(alternative=2, c=1200, half_length=True), 5.0)
+    assert s["cr"]["L_F"] == 1200 and c["cr"]["L_F"] == c["cr"]["L_T"] == 600
+    assert c["b"] == 1200 + 2 * 30 + 2 * 10                      # L = L1 + 2a + 2b
+    assert c["N_u"] > s["N_u"]                                   # shorter buckling length
+    a1 = run(inp(alternative=1, c=1200, half_length=True), 5.0)
+    assert a1["cr"]["L_F"] == 1280 and a1["cr"]["L_T"] == 600    # Alt 1 unchanged
+    pdf = build_report(inp(c=1200, half_length=True), c, "X", "E 350", "Standard formula", 5.0,
+                       column=True)
+    assert pdf[:4] == b"%PDF"

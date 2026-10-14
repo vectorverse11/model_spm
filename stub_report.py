@@ -141,7 +141,7 @@ def _table(rows, widths, header=True, zebra=True, size=9):
     return t
 
 
-def input_rows(inp, r, grade, cg_mode, ecc=None):
+def input_rows(inp, r, grade, cg_mode, ecc=None, column=False):
     """(group, parameter, value) for every value the user gave on the page."""
     alt_name = {1: "Alternative 1 — ball bearings", 2: "Alternative 2 — clamped platen",
                 3: "Alternative 3 — CUFSM + DSM"}[inp.alternative]
@@ -150,7 +150,9 @@ def input_rows(inp, r, grade, cg_mode, ecc=None):
         ("Specimen", "Depth D (flange)", f"{inp.D:g} mm"),
         ("Specimen", "Thickness t", f"{inp.t:g} mm"),
         ("Specimen", "Lip length", f"{inp.lip:g} mm"),
-        ("Specimen", "Length c (cold-formed section)", f"{inp.c:g} mm"),
+        *([("Specimen", "Length L1 (between plates)", f"{inp.c:g} mm"),
+           ("Specimen", "L = L1 + 2a + 2b", f"{r['b']:g} mm")] if column else
+          [("Specimen", "Length c (cold-formed section)", f"{inp.c:g} mm")]),
         ("Centre of Gravity", "Method", cg_mode),
         ("Centre of Gravity", "y_CG from web centreline", f"{r['x_cg']:.3f} mm"),
         ("Perforations", "Pitch", f"{inp.pitch:g} mm"),
@@ -174,7 +176,8 @@ def input_rows(inp, r, grade, cg_mode, ecc=None):
     return rows
 
 
-def build_report(inp, r, client, grade, cg_mode, increment, ecc=None, with_graph=True) -> bytes:
+def build_report(inp, r, client, grade, cg_mode, increment, ecc=None, with_graph=True,
+                 column=False) -> bytes:
     _fonts()
     buf = io.BytesIO()
     W_page, H_page = A4
@@ -194,9 +197,11 @@ def build_report(inp, r, client, grade, cg_mode, increment, ecc=None, with_graph
 
     story = []
     # ---- header band
-    head = Table([[Paragraph("Stub Column Test Report", title)],
+    name = "Column Buckling Test Report" if column else "Stub Column Test Report"
+    head = Table([[Paragraph(name, title)],
                   [Paragraph("Virtual compression test of a perforated rack upright · "
-                             "EN 15512 Annex A.2.1", sub)]],
+                             "EN 15512 Annex A.2.1"
+                             + (" · buckling lengths L1/2 (Alt. 2/3)" if column else ""), sub)]],
                  colWidths=[content_w])
     head.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(NAVY)),
                               ("LEFTPADDING", (0, 0), (-1, -1), 12),
@@ -235,7 +240,7 @@ def build_report(inp, r, client, grade, cg_mode, increment, ecc=None, with_graph
 
     # ---- inputs
     story.append(Paragraph("Input parameters", h2))
-    all_rows = input_rows(inp, r, grade, cg_mode, ecc)
+    all_rows = input_rows(inp, r, grade, cg_mode, ecc, column)
     left_groups = ("Specimen", "Centre of Gravity", "Perforations")
     halves = []
     for part in ([x for x in all_rows if x[0] in left_groups],
@@ -274,7 +279,8 @@ def build_report(inp, r, client, grade, cg_mode, increment, ecc=None, with_graph
         story.append(KeepTogether([
             Paragraph("Axial load vs axial displacement", h2),
             _scaled(_png(axial_figure(r, figsize=(7.2, 4.2))), content_w),
-            Paragraph(f"Shortening δ = N·c / (E·A_eff(σ)) with c = {inp.c:g} mm and "
+            Paragraph(f"Shortening δ = N·{'L1' if column else 'c'} / (E·A_eff(σ)) with "
+                      f"{'L1' if column else 'c'} = {inp.c:g} mm and "
                       f"E = {E:,.0f} N/mm²; the curve ends at the failure load.", small)]))
 
     story += [Spacer(1, 10),
@@ -288,12 +294,12 @@ def build_report(inp, r, client, grade, cg_mode, increment, ecc=None, with_graph
         c.line(margin, 11 * mm, W_page - margin, 11 * mm)
         c.setFont("RPT", 7.5)
         c.setFillColor(colors.HexColor("#7b8a99"))
-        c.drawString(margin, 7 * mm, "Virtual SPM · Stub Column Test Report")
+        c.drawString(margin, 7 * mm, f"Virtual SPM · {name}")
         c.drawRightString(W_page - margin, 7 * mm, f"Page {d.page}")
         c.restoreState()
 
     SimpleDocTemplate(buf, pagesize=A4, leftMargin=margin, rightMargin=margin,
                       topMargin=14 * mm, bottomMargin=16 * mm,
-                      title="Stub Column Test Report", author="Virtual SPM").build(
+                      title=name, author="Virtual SPM").build(
         story, onFirstPage=footer, onLaterPages=footer)
     return buf.getvalue()
