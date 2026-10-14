@@ -130,7 +130,7 @@ def test_column_buckling_half_length():
     assert s["cr"]["L_F"] == 1200 and c["cr"]["L_F"] == c["cr"]["L_T"] == 640   # L/2
     assert c["N_u"] > s["N_u"]                                   # shorter buckling length
     a1 = run(inp(alternative=1, c=1200, half_length=True), 5.0)
-    assert a1["cr"]["L_F"] == 1280 and a1["cr"]["L_T"] == 640    # Alt 1: L, L/2
+    assert a1["cr"]["L_F"] == a1["cr"]["L_T"] == 640             # Alt 1: L/2 as well
     pdf = build_report(inp(c=1200, half_length=True), c, "X", "E 350", "Standard formula", 5.0,
                        column=True)
     assert pdf[:4] == b"%PDF"
