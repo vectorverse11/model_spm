@@ -25,6 +25,7 @@ Optional checks: `python -m pip install pytest`, then `python -m pytest -q tests
 |---|---|
 | `app.py` | Entry point (two pages: CBFEM Virtual Test, Stub Column Test) |
 | `stub_page.py` | Stub Column Test page (inputs, results, graphs, CSV) |
+| `stub_report.py` | Section diagram, axial graph and the PDF report (with / without graph) |
 | `stub.py` | Stub column engine: section properties, effective widths, buckling, virtual test |
 | `fsm.py` | Finite strip method (CUFSM formulation) for local / distortional buckling (Alternative 3) |
 | `stiffness_page.py` | CBFEM Virtual Test page (inputs, results, curves, CSV) |
@@ -117,4 +118,5 @@ buckling and perforations, with EN 1993-1-1 §6.3.1 / EN 1993-1-3 §6.2.3 for bu
    * Alternative 3 (CUFSM + DSM): the finite strip signature curve gives σ_crl (first minimum) and σ_crd (next minimum). The Direct Strength Method (AISI S100, members with holes) then gives P_ne (global, L = c), P_nl (local) and optionally P_nd (distortional), all capped at A_net·f_y. N_u = P_nl, or min(P_nl, P_nd) if distortional is ticked.
 6. Load–dial curve: σ = N/A_eff(σ), δ = N·c/(E·A_eff(σ)), and dial = δ / least count. The proof load is the load at the first local buckling.
 7. Results: R_k, A_eff = R_k/f_y (adjusted if λ̄ > 0.2), N_b,Rd = R_k/γ_M0 (highlighted), Q = A_eff/A_g, a readings table and CSV.
+9. PDF report: heading, client, profile diagram, input table and result table (R_k, N_b,Rd), with or without the axial load–displacement graph.
 8. Graphs: Axial Load vs Axial Displacement (δ) beside the section diagram with the y–z axes and CG; Eccentric Load vs Displacement, where mid-height w = e·[sec(π/2·√(N/N_cr)) − 1] and failure is at N/N_c + N·e·sec(…)/(W_eff·f_y) = 1.
