@@ -126,11 +126,11 @@ def test_column_buckling_half_length():
     from stub_report import build_report
     s = run(inp(alternative=2, c=1200), 5.0)
     c = run(inp(alternative=2, c=1200, half_length=True), 5.0)
-    assert s["cr"]["L_F"] == 1200 and c["cr"]["L_F"] == c["cr"]["L_T"] == 600
     assert c["b"] == 1200 + 2 * 30 + 2 * 10                      # L = L1 + 2a + 2b
+    assert s["cr"]["L_F"] == 1200 and c["cr"]["L_F"] == c["cr"]["L_T"] == 640   # L/2
     assert c["N_u"] > s["N_u"]                                   # shorter buckling length
     a1 = run(inp(alternative=1, c=1200, half_length=True), 5.0)
-    assert a1["cr"]["L_F"] == 1280 and a1["cr"]["L_T"] == 600    # Alt 1 unchanged
+    assert a1["cr"]["L_F"] == 1280 and a1["cr"]["L_T"] == 640    # Alt 1: L, L/2
     pdf = build_report(inp(c=1200, half_length=True), c, "X", "E 350", "Standard formula", 5.0,
                        column=True)
     assert pdf[:4] == b"%PDF"

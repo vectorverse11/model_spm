@@ -130,14 +130,14 @@ def render(mode: str = "stub"):
                                               2: "Alternative 2 — clamped platen",
                                               3: "Alternative 3 — CUFSM + DSM (finite strip + "
                                                  "Direct Strength Method)"}[a])
-        st.caption(f"Alt 1: flexural buckling length = {'L' if column else 'b'}, torsional = {CL}/2; load position between "
+        st.caption(f"Alt 1: flexural buckling length = {'L' if column else 'b'}, torsional = {'L' if column else 'c'}/2; load position between "
                    "the gross and net centroid, adjusted for the maximum failure load.  \n"
-                   + (f"Alt 2: flexural and torsional buckling lengths = {CL}/2; concentric load.  \n"
+                   + ("Alt 2: flexural and torsional buckling lengths = L/2; concentric load.  \n"
                       if column else
                       "Alt 2: flexural and torsional buckling lengths = c (full length); concentric load.  \n") +
                    "Alt 3: finite strip signature curve gives the local (and distortional) buckling "
                    "stress; Direct Strength Method (AISI S100, with holes) gives the strength; "
-                   f"global lengths = {CL + '/2' if column else 'c'}; concentric load.")
+                   f"global lengths = {'L/2' if column else 'c'}; concentric load.")
         dist = False
         if alt == 3:
             dist = st.checkbox("Include distortional buckling in the strength (DSM P_nd)",
@@ -145,8 +145,7 @@ def render(mode: str = "stub"):
                                help="EN 15512 says the stub column test is not used to observe "
                                     "distortional buckling. Tick to let DSM P_nd govern if lower.")
         ecc = st.number_input("Eccentricity e of the load from the CG (mm) — for the eccentric "
-                              "load curve", min_value=0.0, value=None, key=f"{P}_ecc", format="%.2f",
-                              placeholder="enter when the eccentricity factor is known")
+                              "load curve", min_value=0.0, value=0.0, key=f"{P}_ecc", format="%.2f")
         least = num("Dial gauge least count (mm/div)", f"{P}_least", fmt="%.4f")
         inc = num("Load increment per step (kN)", f"{P}_inc", fmt="%.3f")
 
@@ -165,7 +164,7 @@ def render(mode: str = "stub"):
                 with st.spinner("Running the virtual test" +
                                 (" (finite strip analysis)…" if alt == 3 else "…")):
                     res = run(inp, inc)
-                    ecc_res = eccentric_test(inp, res, ecc, inc) if ecc else None
+                    ecc_res = eccentric_test(inp, res, ecc, inc) if ecc is not None else None
                 st.session_state[RES] = {
                     "res": res, "inp": inp, "inc": inc, "ecc": ecc_res, "client": client,
                     "grade": grade if grade != "Customize..." else "Customized f_y",
