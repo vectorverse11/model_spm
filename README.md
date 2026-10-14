@@ -126,6 +126,6 @@ buckling and perforations, with EN 1993-1-1 §6.3.1 / EN 1993-1-3 §6.2.3 for bu
 ## Column Buckling Test
 Same page, engine and report as the Stub Column Test (`column_page.py` → `stub_ui.render("column")`), with two differences:
 * Length input **L1** (upright between the plates); **L = L1 + 2·a + 2·b** (a = cap plate thickness, b = base plate thickness) is calculated and shown.
-* Buckling lengths: flexural = torsional = **L/2** for all alternatives.
+* Buckling lengths: Alternatives 2 and 3 flexural = torsional = **L/2**; Alternative 1 flexural = L, torsional = L/2.
 * Eccentric load (Column Buckling Test): Euler equation σ_cr = P_cr/A = π²E/(K·L/r)², r = √(I/A), with the effective length factor K (input, 0.5 = L/2); P_cr limits and amplifies the eccentric load.
 * Both test pages start with eccentricity e = 0 (the eccentric curve then equals the concentric case).
