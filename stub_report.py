@@ -173,6 +173,9 @@ def input_rows(inp, r, grade, cg_mode, ecc=None, column=False):
     rows += [("Test", "Dial gauge least count", f"{inp.least_count:g} mm/div")]
     if ecc is not None:
         rows.append(("Test", "Eccentricity e from CG", f"{ecc['e']:g} mm"))
+        if ecc.get("euler"):
+            eu = ecc["euler"]
+            rows.append(("Test", "Effective length factor K", f"{eu['K']:g}"))
     return rows
 
 
@@ -264,6 +267,10 @@ def build_report(inp, r, client, grade, cg_mode, increment, ecc=None, with_graph
                 ["Design capacity N_b,Rd = R_k / γ_M0",
                  f"{r['R_k'] / 1000:.2f} / {inp.gamma_M0:g} = {r['N_b_Rd'] / 1000:.2f} kN"]]
     if ecc is not None:
+        if ecc.get("euler"):
+            eu = ecc["euler"]
+            res_rows.append([f"Euler P_cr = π²EA / (KL/r)²  (K = {eu['K']:g}, KL/r = "
+                             f"{eu['slender']:.1f})", f"{eu['P_cr'] / 1000:.2f} kN"])
         res_rows.append([f"Eccentric failure load (e = {ecc['e']:g} mm)",
                          f"{ecc['N_ue'] / 1000:.2f} kN"])
     rt = _table(res_rows, [95 * mm, content_w - 95 * mm], zebra=False)

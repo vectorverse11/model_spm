@@ -485,7 +485,8 @@ def run(inp: StubInputs, increment_kN: float) -> Dict:
 
 # ------------------------------------------------- eccentric load (secant formula)
 
-def eccentric_test(inp: StubInputs, res: Dict, e: float, increment_kN: float) -> Dict:
+def eccentric_test(inp: StubInputs, res: Dict, e: float, increment_kN: float,
+                   K: Optional[float] = None) -> Dict:
     """Load applied at eccentricity e (mm) from the CG along the symmetry axis.
 
     Mid-height lateral deflection (pin-ended, secant formula):
@@ -493,9 +494,23 @@ def eccentric_test(inp: StubInputs, res: Dict, e: float, increment_kN: float) ->
         parallel to the web)
     Failure when  N / N_c + N·e·sec(π/2·√(N/N_cr)) / (W_eff·f_y) = 1   (N_c from the chosen
     alternative, W_eff from the effective section).
+
+    Column Buckling Test (K given): Euler equation with the effective length factor K,
+        σ_cr = P_cr / A = π²·E / (K·L / r)²,   r = √(I / A),  L = L1 + 2a + 2b,
+    and N_cr = P_cr limits and amplifies the eccentric load.
     """
     e = abs(e)
     N_c, N_cr = res["N_c"], res["cr"]["N_cr_y"]
+    euler = None
+    if K is not None:
+        g = res["gross"]
+        A, I, L = g["A"], g["Iy"], res["b"]
+        r = sqrt(I / A)
+        slender = K * L / r
+        sigma_cr = pi**2 * E / slender**2
+        N_cr = sigma_cr * A
+        euler = {"K": K, "L": L, "A": A, "I": I, "r": r, "slender": slender,
+                 "sigma_cr": sigma_cr, "P_cr": N_cr}
     W, fy = res["eff"]["W_eff"], inp.fy
 
     def amp(N):
@@ -522,4 +537,4 @@ def eccentric_test(inp: StubInputs, res: Dict, e: float, increment_kN: float) ->
         rows.append({"N": N, "w": e * (amp(N) - 1.0), "delta": N * inp.c / (E * A),
                      "M": N * e * amp(N)})
     return {"e": e, "N_ue": N_ue, "N_c": N_c, "N_cr": N_cr, "W_eff": W, "rows": rows,
-            "ratio": N_ue / res["N_u"]}
+            "ratio": N_ue / res["N_u"], "euler": euler}

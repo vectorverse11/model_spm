@@ -134,3 +134,19 @@ def test_column_buckling_half_length():
     pdf = build_report(inp(c=1200, half_length=True), c, "X", "E 350", "Standard formula", 5.0,
                        column=True)
     assert pdf[:4] == b"%PDF"
+
+
+def test_column_eccentric_uses_euler_with_K():
+    from math import pi, sqrt
+    from stub import eccentric_test
+    i = inp(alternative=2, c=1029, half_length=True)
+    r = run(i, 5.0)
+    ec = eccentric_test(i, r, 5.0, 5.0, K=0.5)
+    eu = ec["euler"]
+    rad = sqrt(r["gross"]["Iy"] / r["gross"]["A"])
+    assert eu["L"] == r["b"] and eu["r"] == pytest.approx(rad)
+    assert eu["sigma_cr"] == pytest.approx(pi**2 * E / (0.5 * r["b"] / rad) ** 2)
+    assert ec["N_cr"] == pytest.approx(eu["sigma_cr"] * r["gross"]["A"])
+    assert ec["N_ue"] < min(r["N_u"], eu["P_cr"])
+    k1 = eccentric_test(i, r, 5.0, 5.0, K=1.0)                    # longer → lower load
+    assert k1["N_ue"] < ec["N_ue"]
