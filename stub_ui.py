@@ -130,7 +130,7 @@ def render(mode: str = "stub"):
                                               2: "Alternative 2 — clamped platen",
                                               3: "Alternative 3 — CUFSM + DSM (finite strip + "
                                                  "Direct Strength Method)"}[a])
-        st.caption(f"Alt 1: flexural buckling length = {'L/2' if column else 'b'}, torsional = {'L' if column else 'c'}/2; load position between "
+        st.caption(f"Alt 1: flexural buckling length = {'L' if column else 'b'}, torsional = {'L' if column else 'c'}/2; load position between "
                    "the gross and net centroid, adjusted for the maximum failure load.  \n"
                    + ("Alt 2: flexural and torsional buckling lengths = L/2; concentric load.  \n"
                       if column else

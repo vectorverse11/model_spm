@@ -254,7 +254,7 @@ def critical_loads(inp: StubInputs) -> Dict[str, float]:
     g = gross_properties(inp)
     b = buckling_length_b(inp)
     if inp.half_length:                               # column buckling test, L = L1 + 2a + 2b
-        L_F, L_T = b / 2.0, b / 2.0                   # all alternatives: L/2
+        L_F, L_T = (b, b / 2.0) if inp.alternative == 1 else (b / 2.0, b / 2.0)
     elif inp.alternative == 1:
         L_F, L_T = b, inp.c / 2.0
     else:                                             # stub column test: c
