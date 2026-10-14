@@ -146,6 +146,12 @@ def render(mode: str = "stub"):
                                     "distortional buckling. Tick to let DSM P_nd govern if lower.")
         ecc = st.number_input("Eccentricity e of the load from the CG (mm) — for the eccentric "
                               "load curve", min_value=0.0, value=0.0, key=f"{P}_ecc", format="%.2f")
+        K = None
+        if column:
+            K = st.number_input("Effective length factor K (Euler: σ_cr = π²E / (K·L/r)²)",
+                                min_value=0.01, value=0.5, key=f"{P}_K", format="%.2f",
+                                help="Used for the eccentric load. K = 0.5 matches the L/2 "
+                                     "buckling length (both ends fixed); 1.0 = pinned ends.")
         least = num("Dial gauge least count (mm/div)", f"{P}_least", fmt="%.4f")
         inc = num("Load increment per step (kN)", f"{P}_inc", fmt="%.3f")
 
@@ -164,7 +170,8 @@ def render(mode: str = "stub"):
                 with st.spinner("Running the virtual test" +
                                 (" (finite strip analysis)…" if alt == 3 else "…")):
                     res = run(inp, inc)
-                    ecc_res = eccentric_test(inp, res, ecc, inc) if ecc is not None else None
+                    ecc_res = (eccentric_test(inp, res, ecc, inc, K=K) if ecc is not None
+                               else None)
                 st.session_state[RES] = {
                     "res": res, "inp": inp, "inc": inc, "ecc": ecc_res, "client": client,
                     "grade": grade if grade != "Customize..." else "Customized f_y",
@@ -237,8 +244,18 @@ def render(mode: str = "stub"):
         ax4.grid(alpha=0.3)
         ax4.legend(fontsize=8, loc="lower right")
         st.pyplot(fig4)
+        eu = ec.get("euler")
+        if eu:
+            calc(f"""
+    * **Euler equation** (effective length factor K): σ_cr = P_cr / A = π²·E / (K·L / r)²
+    * r = √(I / A) = √({eu['I']:,.0f} / {eu['A']:.2f}) = **{eu['r']:.3f} mm** ·
+      K·L / r = {eu['K']:g} × {eu['L']:g} / {eu['r']:.3f} = **{eu['slender']:.2f}**
+    * σ_cr = π² × {E:,.0f} / {eu['slender']:.2f}² = **{eu['sigma_cr']:,.2f} N/mm²** →
+      P_cr = σ_cr × A = {eu['sigma_cr']:,.2f} × {eu['A']:.2f} = **{eu['P_cr'] / 1000:,.2f} kN**
+      (the eccentric load cannot exceed P_cr and is amplified by it below)
+    """)
         calc(f"""
-    * w = e · [sec(π/2 · √(N/N_cr)) − 1], N_cr = π²·E·I_y / L_F² = **{ec['N_cr'] / 1000:,.1f} kN**
+    * w = e · [sec(π/2 · √(N/N_cr)) − 1], N_cr = {'P_cr (Euler, above)' if eu else 'π²·E·I_y / L_F²'} = **{ec['N_cr'] / 1000:,.1f} kN**
     * Failure when N / N_c + N·e·sec(π/2·√(N/N_cr)) / (W_eff·f_y) = 1 with N_c = {ec['N_c'] / 1000:.2f} kN,
       W_eff = {ec['W_eff']:,.1f} mm³ → **eccentric failure load = {ec['N_ue'] / 1000:.2f} kN**
       ({ec['ratio'] * 100:.1f} % of the concentric failure load)
