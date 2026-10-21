@@ -536,5 +536,10 @@ def eccentric_test(inp: StubInputs, res: Dict, e: float, increment_kN: float,
         A = _A_eff_at_load(inp, N, res.get("dsm"))
         rows.append({"N": N, "w": e * (amp(N) - 1.0), "delta": N * inp.c / (E * A),
                      "M": N * e * amp(N)})
+    Nb = res["N_b_Rd"]                                # effect of e at the design load N_b,Rd
+    at_Nb = {"N_b_Rd": Nb, "ratio_cr": Nb / N_cr, "arg": pi / 2 * sqrt(Nb / N_cr),
+             "amp": amp(Nb), "M0": Nb * e, "w": e * (amp(Nb) - 1.0), "M_max": Nb * e * amp(Nb),
+             "U_N": Nb / N_c, "U_M": Nb * e * amp(Nb) / (W * fy), "U": U(Nb)}
     return {"e": e, "N_ue": N_ue, "N_c": N_c, "N_cr": N_cr, "W_eff": W, "rows": rows,
-            "ratio": N_ue / res["N_u"], "euler": euler}
+            "ratio": N_ue / res["N_u"], "euler": euler, "at_Nb": at_Nb,
+            "N_ue_d": N_ue / inp.gamma_M0}
