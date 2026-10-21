@@ -150,3 +150,19 @@ def test_column_eccentric_uses_euler_with_K():
     assert ec["N_ue"] < min(r["N_u"], eu["P_cr"])
     k1 = eccentric_test(i, r, 5.0, 5.0, K=1.0)                    # longer → lower load
     assert k1["N_ue"] < ec["N_ue"]
+
+
+def test_eccentric_effect_at_N_b_Rd():
+    from math import cos, pi, sqrt
+    from stub import eccentric_test
+    i = inp(alternative=2, c=1029, half_length=True)
+    r = run(i, 5.0)
+    ec = eccentric_test(i, r, 5.0, 5.0, K=0.5)
+    nb, Nb = ec["at_Nb"], r["N_b_Rd"]
+    amp = 1 / cos(pi / 2 * sqrt(Nb / ec["N_cr"]))
+    assert nb["amp"] == pytest.approx(amp)
+    assert nb["w"] == pytest.approx(5.0 * (amp - 1))
+    assert nb["M_max"] == pytest.approx(Nb * (5.0 + nb["w"]))
+    assert nb["U"] == pytest.approx(Nb / ec["N_c"] + nb["M_max"] / (ec["W_eff"] * 350))
+    assert ec["N_ue_d"] == pytest.approx(ec["N_ue"] / i.gamma_M0)
+    assert eccentric_test(i, r, 0.0, 5.0, K=0.5)["at_Nb"]["M_max"] == 0

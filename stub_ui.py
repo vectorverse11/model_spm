@@ -257,11 +257,29 @@ def render(mode: str = "stub"):
           P_cr = σ_cr × A = {eu['sigma_cr']:,.2f} × {eu['A']:.2f} = **{eu['P_cr'] / 1000:,.2f} kN**
           (the eccentric load cannot exceed P_cr and is amplified by it below)
         """)
+            nb, e_ = ec["at_Nb"], ec["e"]
+            Pc = "P_cr" if eu else "N_cr"
+            st.markdown(f"**How the eccentricity e = {e_:g} mm acts at N_b,Rd**")
             calc(f"""
-        * w = e · [sec(π/2 · √(N/N_cr)) − 1], N_cr = {'P_cr (Euler, above)' if eu else 'π²·E·I_y / L_F²'} = **{ec['N_cr'] / 1000:,.1f} kN**
-        * Failure when N / N_c + N·e·sec(π/2·√(N/N_cr)) / (W_eff·f_y) = 1 with N_c = {ec['N_c'] / 1000:.2f} kN,
-          W_eff = {ec['W_eff']:,.1f} mm³ → **eccentric failure load = {ec['N_ue'] / 1000:.2f} kN**
-          ({ec['ratio'] * 100:.1f} % of the concentric failure load)
+        * **1 · Load ratio:** N_b,Rd / {Pc} = {nb['N_b_Rd'] / 1000:.2f} / {ec['N_cr'] / 1000:,.2f} =
+          **{nb['ratio_cr']:.4f}**
+        * **2 · Amplification factor:** π/2 · √(N_b,Rd / {Pc}) = 1.5708 × √{nb['ratio_cr']:.4f} =
+          {nb['arg']:.4f} rad → sec({nb['arg']:.4f}) = 1 / cos({nb['arg']:.4f}) = **{nb['amp']:.4f}**
+        * **3 · First-order moment:** M₀ = N_b,Rd · e = {nb['N_b_Rd'] / 1000:.2f} kN × {e_:g} mm =
+          **{nb['M0'] / 1e6:.4f} kN·m**
+        * **4 · Lateral deflection at mid-height:** w = e · [sec(π/2·√(N_b,Rd / {Pc})) − 1] =
+          {e_:g} × ({nb['amp']:.4f} − 1) = **{nb['w']:.4f} mm**
+        * **5 · Amplified moment:** M_max = N_b,Rd · e · sec(…) = N_b,Rd · (e + w) =
+          {nb['N_b_Rd'] / 1000:.2f} × ({e_:g} + {nb['w']:.4f}) = **{nb['M_max'] / 1e6:.4f} kN·m**
+        * **6 · Interaction check:** N_b,Rd / N_c + M_max / (W_eff · f_y) =
+          {nb['N_b_Rd'] / 1000:.2f} / {ec['N_c'] / 1000:.2f} + {nb['M_max']:,.0f} / ({ec['W_eff']:,.1f} × {inp.fy:g}) =
+          {nb['U_N']:.4f} + {nb['U_M']:.4f} = **{nb['U']:.4f}**
+          {'≤ 1 → N_b,Rd can be carried at this eccentricity ✅' if nb['U'] <= 1 else '> 1 → N_b,Rd cannot be carried at this eccentricity ❌'}
+        * **7 · Eccentric failure load:** solve N / N_c + N·e·sec(π/2·√(N / {Pc})) / (W_eff·f_y) = 1 →
+          **N_ue = {ec['N_ue'] / 1000:.2f} kN** ({ec['ratio'] * 100:.1f} % of the concentric failure load
+          R_k = {r['R_k'] / 1000:.2f} kN)
+        * **8 · Eccentric design load:** N_ue / γ_M0 = {ec['N_ue'] / 1000:.2f} / {inp.gamma_M0:g} =
+          **{ec['N_ue_d'] / 1000:.2f} kN** (compare N_b,Rd = {nb['N_b_Rd'] / 1000:.2f} kN at e = 0)
         """)
 
     # ---------------- step by step ----------------
