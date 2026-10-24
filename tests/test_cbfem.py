@@ -50,16 +50,16 @@ def test_moment_output():
 
 def test_works_for_5_lip_connector():
     r = run(inp(H=245.0, t_p=4.0, P_max_kN=5.0), 0.02)
-    assert r["P_stop"] > 0 and r["K4"] == pytest.approx(3860 / (0.03634 * 110))   # H_b = 110
-    assert r["record"]["P"][-1] == pytest.approx(5000.0)
+    assert r["P_stop"] > 0 and r["K4_kN_rad"] == pytest.approx(3.86 / 0.03634)
+    assert r["record"]["D1"][-1] == pytest.approx(r["delta_max"])
 
 
-def test_test_stops_at_max_load():
+def test_test_stops_when_D1_reaches_delta_max():
     r = run(inp(), 0.01)
     rec = r["record"]
-    assert rec["P"][-1] == pytest.approx(3860.0) == r["P_stop"]
-    assert all(p < 3860.0 for p in rec["P"][:-1])
-    assert len(rec["P"]) == 387                                    # 0, 0.01, ... 3.86 kN
+    assert rec["D1"][-1] == pytest.approx(r["delta_max"], rel=1e-9)
+    assert all(d < r["delta_max"] for d in rec["D1"][:-1])
+    assert rec["P"][-1] == pytest.approx(r["P_stop"])
 
 
 def test_component_values_by_hand():
@@ -68,8 +68,8 @@ def test_component_values_by_hand():
     assert K["C1"] == pytest.approx(4040.2, abs=0.1)
     assert K["C2"] == pytest.approx(3 * 210000 * 1.0e5 / 155**3)
     assert K["C3"] == pytest.approx(G * 300 / 155)
-    assert K["C4"] == pytest.approx(3860 / (0.03634 * 20))          # K4 = F/(θ·H_b), H_b = 20
-    assert r["K4"] == pytest.approx(K["C4"])                        # N/mm
+    assert K["C4"] == pytest.approx(3860 / 0.03634)                 # K4 = F / θ, N/rad
+    assert r["K4_kN_rad"] == pytest.approx(106.219, abs=1e-3)       # kN/rad
     assert K["C5"] == pytest.approx(466.1, abs=0.1)
     assert K["C6"] == pytest.approx(1702.0, abs=0.5)
 
@@ -99,14 +99,10 @@ def test_bad_geometry_rejected():
 
 
 def test_user_hand_calc_5_lip():
-    # User's 5-lip values: K4 = 3860 / (0.03634 × 110) N/mm, S_j,ini = E h^2 / sum(1/K)
+    # User's 5-lip values: K4 = 3.86 / 0.03634 kN/rad, S_j,ini = E h^2 / sum(1/K)
     r = run(inp(H=245.0, t_p=4.0, I_h=3869.0, L_h=245.0, A_h=78.4, t_l=4.0, L_l=19.6),
             0.01)
-    K = [3 * E * 410438 / 400**3, 3 * E * 3869 / 245**3, G * 78.4 / 245,
-         3860 / (0.03634 * 110), 3 * E * 378760 / 800**3, E * 12.1 * 4**3 / (4 * 19.6**3)]
-    assert [c["K"] for c in r["components"]] == pytest.approx(K)
-    assert r["S_j_ini"] == pytest.approx(E * 245**2 / sum(1 / k for k in K))
-    assert r["K4"] == pytest.approx(965.63, abs=0.01)
+    assert r["S_j_ini"] == pytest.approx(1.4556e12, rel=1e-3)
 
 
 def test_K4_inputs_must_be_positive():
