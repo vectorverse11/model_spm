@@ -3,9 +3,9 @@ CBFEM Virtual Test — Initial & Secant Stiffness (Streamlit page)
 ================================================================
 Hook-connector joint: upright + beam + hook connector (any number of lips).
 The user chooses or enters the sections, the component properties and the
-max load P. The virtual machine raises the load in steps until it reaches the
-max load P, where the test stops; δ_max = P·a²(3l − a)/(6·E·I) and the moment
-M = P·a are calculated at the max load. K4 = F / (θ_available·H_b) (N/mm) with F and
+max load P. δ_max = P·a²(3l − a)/(6·E·I) is calculated from P; the virtual
+machine raises the load in steps until the D1 reading reaches δ_max, notes the
+load P_stop and the moment M = P_stop·a. K4 = F / θ_available (kN/rad) with F and
 θ_available entered by the user. Calculates the initial and secant
 stiffness, and generates the curves.
 
@@ -221,15 +221,12 @@ with r1[2].container(border=True):
            G * A_h / L_h if A_h and L_h else None)
 
 with r2[0].container(border=True):
-    st.markdown("**C4 · Hook–upright bearing**  \n`K4 = F / (θ_available × H_b)`")
+    st.markdown("**C4 · Hook–upright bearing**  \n`K4 = F / θ_available`  (kN/rad)")
     F_K4 = num("F — force (kN)", "F_K4", fmt="%.4f")
     theta_avail = num("θ_available (rad)", "theta_avail", fmt="%.5f",
                       help="Enter in radians. It is not converted to mm.")
-    hb_c4 = H - (H_t + beam_depth) if H and H_t and beam_depth else None
-    st.caption("δ_bearing = θ_available × H_b (mm), H_b from the geometry section.")
-    if F_K4 and theta_avail and hb_c4 and hb_c4 > 0:
-        show_k("K4", f"{F_K4 * 1000:g} / ({theta_avail:g} × {hb_c4:g})",
-               F_K4 * 1000 / (theta_avail * hb_c4))
+    if F_K4 and theta_avail:
+        st.markdown(f"K4 = {F_K4:g} / {theta_avail:g} = **{F_K4 / theta_avail:,.4f} kN/rad**")
 
 with r2[1].container(border=True):
     st.markdown("**C5 · Upright local deformation**  \n`K5 = 3·E·I_u / L_u³`")
@@ -250,14 +247,14 @@ with r2[2].container(border=True):
 # 5. MAX DEFLECTION + RUN
 # ============================================================
 
-st.subheader("⏹ Max Load (test stop) & Max Deflection")
+st.subheader("⏹ Max Deflection (test stop)")
 with st.container(border=True):
     st.markdown("`δ_max = [P·a²·(3l − a)] / (6·E·I)`  ·  P = max load, a = 400 mm, "
                 "l = 500 mm, I = I_b (from C1)")
     m_cols = st.columns([1, 2])
     with m_cols[0]:
         P_max = num("P — max load (kN)", "P_max", fmt="%.3f",
-                    help="The test stops when the load reaches this value. Also used for δ_max.")
+                    help="Max load, used only to calculate δ_max — not the step load.")
     if P_max and I_b:
         m_cols[1].markdown(
             f"δ_max = {P_max * 1000:,.0f} × {LOAD_ARM:g}² × (3 × {BEAM_LENGTH:g} − "
@@ -269,7 +266,7 @@ c_inc, c_btn = st.columns([1, 2])
 with c_inc:
     increment = num("Load increment per step (kN)", "increment", fmt="%.3f",
                     help="Load starts at 0 kN and increases by this amount "
-                         "every step until the max load is reached.")
+                         "every step until the max deflection is reached.")
 c_btn.write("")
 c_btn.write("")
 go = c_btn.button("▶ Run Virtual Test", type="primary")
@@ -305,27 +302,26 @@ a = LOAD_ARM
 
 st.header(f"📊 Results{' — ' + R['client'] if R['client'] else ''}")
 st.caption(" · ".join(R["names"]) + " · " + R["steel"])
-st.success(f"⏹ Test stopped at the max load **P = {res['P_stop'] / 1000:.3f} kN** after "
-           f"{res['steps']} steps · D1 = **{rec['D1'][-1]:.4f} mm** · moment "
-           f"**M = P × a = {res['M_max'] / 1e6:.4f} kN·m** · δ_max = "
-           f"**{res['delta_max']:.4f} mm**.")
+st.success(f"⏹ Test stopped when D1 reached the max deflection **δ_max = "
+           f"{res['delta_max']:.4f} mm** after {res['steps']} steps. Load noted: "
+           f"**P_stop = {res['P_stop']:,.2f} N ({res['P_stop'] / 1000:.3f} kN)** · moment "
+           f"**M = P_stop × a = {res['M_max'] / 1e6:.4f} kN·m**.")
 
 m1 = st.columns(4)
 m1[0].metric("Max deflection δ_max", f"{res['delta_max']:.4f} mm",
              "P·a²(3l − a) / 6EI", delta_color="off")
-m1[1].metric("D1 at max load", f"{rec['D1'][-1]:.4f} mm")
-m1[2].metric("Moment M = P × a", f"{res['M_max'] / 1e6:.4f} kN·m")
-m1[3].metric("K4 = F / (θ_available × H_b)", f"{res['K4']:,.2f} N/mm")
+m1[1].metric("Load at max deflection P_stop", f"{res['P_stop'] / 1000:.3f} kN")
+m1[2].metric("Moment M = P_stop × a", f"{res['M_max'] / 1e6:.4f} kN·m")
+m1[3].metric("K4 = F / θ_available", f"{res['K4_kN_rad']:,.4f} kN/rad")
 m1[0].caption(f"δ_max = {res['P_max']:,.0f} × {a:g}² × (3 × {BEAM_LENGTH:g} − {a:g}) / "
               f"(6 × {E:,.0f} × {inp.I_b:g}) = **{res['delta_max']:.4f} mm**")
-m1[1].caption(f"D1 = P·a³/(3·E·I_b) + a·tan θ = {res['P_stop']:,.0f} × {a:g}³ / (3 × "
-              f"{E:,.0f} × {inp.I_b:g}) + {a:g} × tan({rec['theta'][-1]:.6g}) = "
-              f"**{rec['D1'][-1]:.4f} mm**")
-m1[2].caption(f"M = P × a = {res['P_stop']:,.2f} × {a:g} = {res['M_max']:,.0f} N·mm = "
+m1[1].caption(f"P_stop = load at which D1 = δ_max = {res['delta_max']:.4f} mm → "
+              f"**{res['P_stop']:,.2f} N = {res['P_stop'] / 1000:.3f} kN**")
+m1[2].caption(f"M = P_stop × a = {res['P_stop']:,.2f} × {a:g} = {res['M_max']:,.0f} N·mm = "
               f"**{res['M_max'] / 1e6:.4f} kN·m**")
-m1[3].caption(f"K4 = F / (θ_available × H_b) = {inp.F_kN * 1000:g} / ({inp.theta_avail:g} × "
-              f"{res['H_b']:g}) = {inp.F_kN * 1000:g} / {res['delta_bearing']:.4f} = "
-              f"**{res['K4']:,.2f} N/mm**")
+m1[3].caption(f"K4 = F / θ_available = {inp.F_kN:g} kN / {inp.theta_avail:g} rad = "
+              f"**{res['K4_kN_rad']:,.4f} kN/rad** (used as {res['K4_kN_rad'] * 1000:,.1f} "
+              "N/rad in 1/K1 + … + 1/K6)")
 m2 = st.columns(3)
 m2[0].metric("Initial stiffness S_j,ini", f"{res['S_j_ini'] / 1e6:,.3f} kN·m/rad")
 m2[1].metric("Secant stiffness S_j = S_j,ini / 2", f"{res['S_j'] / 1e6:,.3f} kN·m/rad")
@@ -351,7 +347,7 @@ fig, ax = plt.subplots(1, 3, figsize=(17, 5))
 ax[0].plot(rec["D1"], P_kN, "g-", lw=2, label=f"D1 piston ({a:g} mm)")
 ax[0].plot(rec["D3"], P_kN, "r--", lw=1.5, label=f"D3 ({X_D3:g} mm)")
 ax[0].plot(rec["D2"], P_kN, "b-", lw=1.5, label=f"D2 ({X_D2:g} mm)")
-ax[0].axvline(res["delta_max"], color="grey", ls=":", label="δ_max (beam, at max load)")
+ax[0].axvline(res["delta_max"], color="grey", ls=":", label="δ_max (test stop)")
 ax[0].set(xlabel="Displacement (mm)", ylabel="Load P (kN)", title="Load vs Displacement")
 ax[0].grid(alpha=0.3)
 ax[0].legend(loc="lower right", fontsize=8)
@@ -362,7 +358,7 @@ ax[1].plot([0, th_ini * 1.15], [0, res["S_j_ini"] * th_ini * 1.15 / 1e6], "k:", 
            label="Initial stiffness S_j,ini")
 ax[1].plot([0, th[-1]], [0, res["M_max"] / 1e6], "b--", lw=1.3,
            label="Secant stiffness S_j = S_j,ini/2")
-ax[1].axhline(res["M_max"] / 1e6, color="grey", ls=":", label="M = P × a (max load)")
+ax[1].axhline(res["M_max"] / 1e6, color="grey", ls=":", label="M = P_stop × a")
 ax[1].set(xlabel="Rotation θ (rad)", ylabel="Moment M (kN·m)", title="Moment vs Rotation")
 ax[1].grid(alpha=0.3)
 ax[1].legend(loc="lower right", fontsize=8)
@@ -380,8 +376,8 @@ comp_df = pd.DataFrame([{
     "Component": f"{c['C']} {c['Component']}",
     "Formula": c["Formula"],
     "Working": c["Working"],
-    "K (N/mm)": round(c["K"], 3),
-    "1/K (mm/N)": c["1/K"],
+    "K (N/mm; K4 in N/rad)": round(c["K"], 3),
+    "1/K": c["1/K"],
 } for c in res["components"]])
 st.dataframe(comp_df, hide_index=True, width="stretch")
 
@@ -394,13 +390,14 @@ st.markdown(f"""
    {res['P_max']:,.0f} × {a:g}² × (3 × {BEAM_LENGTH:g} − {a:g}) / (6 × {E:,.0f} × {inp.I_b:g})
    = **{res['delta_max']:.4f} mm**
 2. **Virtual test:** the load rises from 0 in {R['inc']} kN steps and the D1 piston
-   reading grows with it. The test stops at the max load
-   **P = {res['P_stop']:,.2f} N**, where D1 = **{rec['D1'][-1]:.4f} mm**
-3. **Moment** M = P × a = {res['P_stop']:,.2f} × {a:g} = {res['M_max']:,.0f} N·mm =
+   reading grows with it. When D1 reaches δ_max the test stops and the load is noted:
+   **P_stop = {res['P_stop']:,.2f} N**
+3. **Moment** M = P_stop × a = {res['P_stop']:,.2f} × {a:g} = {res['M_max']:,.0f} N·mm =
    **{res['M_max'] / 1e6:.4f} kN·m**
-4. **K4 = F / (θ_available × H_b)** = {inp.F_kN * 1000:g} / ({inp.theta_avail:g} × {res['H_b']:g})
-   = **{res['K4']:,.2f} N/mm** (δ_bearing = θ_available × H_b = {res['delta_bearing']:.4f} mm)
-5. **1/K1 + 1/K2 + 1/K3 + 1/K4 + 1/K5 + 1/K6** = {terms} = **{res['sum_inv_K']:.6g} mm/N**
+4. **K4 = F / θ_available** = {inp.F_kN:g} kN / {inp.theta_avail:g} rad =
+   **{res['K4_kN_rad']:,.4f} kN/rad** (θ_available in radians, not converted to mm)
+5. **1/K1 + 1/K2 + 1/K3 + 1/K4 + 1/K5 + 1/K6** = {terms} = **{res['sum_inv_K']:.6g}**
+   (K4 used as {res['K4_kN_rad'] * 1000:,.1f} N/rad)
 6. **Initial stiffness** S_j,ini = E × h² / (1/K1 + … + 1/K6) =
    {E:,.0f} × {res['h']:g}² / {res['sum_inv_K']:.6g} = {res['S_j_ini']:,.4g}
    → **{res['S_j_ini'] / 1e6:,.3f} kN·m/rad**
@@ -440,9 +437,10 @@ summary = pd.concat([
     pd.DataFrame([
         {"Component": "Max load P (kN)", "Working": f"{res['P_max'] / 1000:g}"},
         {"Component": "Max deflection δ_max (mm)", "Working": f"{res['delta_max']:.4f}"},
-        {"Component": "D1 at max load (mm)", "Working": f"{rec['D1'][-1]:.4f}"},
-        {"Component": "Moment M = P × a (kN·m)", "Working": f"{res['M_max'] / 1e6:.4f}"},
-        {"Component": "1/K1 + … + 1/K6 (mm/N)", "1/K (mm/N)": res["sum_inv_K"]},
+        {"Component": "P_stop — load at max deflection (N)", "Working": f"{res['P_stop']:.2f}"},
+        {"Component": "Moment M = P_stop × a (kN·m)", "Working": f"{res['M_max'] / 1e6:.4f}"},
+        {"Component": "K4 = F / θ_available (kN/rad)", "Working": f"{res['K4_kN_rad']:.4f}"},
+        {"Component": "1/K1 + … + 1/K6", "1/K": res["sum_inv_K"]},
         {"Component": "h (mm)", "Working": f"{res['h']:g}"},
         {"Component": "S_j,ini (kN·m/rad)", "Working": f"{res['S_j_ini'] / 1e6:.4f}"},
         {"Component": "S_j (kN·m/rad)", "Working": f"{res['S_j'] / 1e6:.4f}"},

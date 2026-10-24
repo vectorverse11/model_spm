@@ -10,19 +10,20 @@ Fixed values (steel): E = 210000 N/mm^2, G = 80769 N/mm^2, nu = 0.3
 Rig: a = 400 mm (load point / D1 piston), l = 500 mm (beam length),
      sensors D2 = 40 mm, D3 = 140 mm from the upright face.
 
-1. Test stop and max deflection
-   The load rises from 0 kN in steps of the user-entered increment and the test
-   stops when the load reaches the MAX load P (user input).
-       delta_max = P a^2 (3 l - a) / (6 E I_b)     beam deflection at the max load
+1. Max deflection (stop condition)
+       delta_max = P a^2 (3 l - a) / (6 E I_b)     P = MAX load (user input),
+                                                   not the step load
+   The load rises from 0 kN in steps of the user-entered increment; when the D1 piston
+   reading reaches delta_max the test stops and that load is noted (P_stop).
 
-2. Component stiffnesses (all in N/mm)
+2. Component stiffnesses (K1-K3, K5, K6 in N/mm; K4 in kN/rad)
        K1 = 3 E I_b / L_b^3        beam local deformation
        K2 = 3 E I_h / L_h^3        hook bending
        K3 = G A_h / L_h            hook shear
-       K4 = F / (theta_available * H_b)   hook-upright bearing, N/mm
+       K4 = F / theta_available    hook-upright bearing, kN/rad
             F (kN) and theta_available (rad) are entered by the user;
-            the bearing deflection is delta = theta_available * H_b (mm),
-            H_b = H - (H_t + beam depth).
+            theta_available stays in radians (not converted to mm).
+            In the sum 1/K1 + ... + 1/K6, K4 is used as N/rad (= kN/rad x 1000).
        K5 = 3 E I_u / L_u^3        upright local deformation
        K6 = E b_l t_l^3 / (4 L_l^3) upright lip deformation
 
@@ -83,9 +84,9 @@ class CBFEMInputs:
     theta_avail: float  # theta_available for K4, rad (user input)
 
 
-def K4_N_per_mm(inp: "CBFEMInputs") -> float:
-    """K4 = F / (theta_available * H_b), N/mm (F entered in kN)."""
-    return inp.F_kN * 1000.0 / (inp.theta_avail * H_b(inp))
+def K4_kN_per_rad(inp: "CBFEMInputs") -> float:
+    """K4 = F / theta_available, kN/rad."""
+    return inp.F_kN / inp.theta_avail
 
 
 def deflection(P: float, I_b: float) -> float:
@@ -99,7 +100,7 @@ def H_b(inp: CBFEMInputs) -> float:
 
 
 def components(inp: CBFEMInputs) -> List[Dict]:
-    """K1 ... K6, all in N/mm."""
+    """K1-K3, K5, K6 in N/mm; K4 in N/rad (shown to the user in kN/rad)."""
     return [
         {"C": "C1", "Component": "Beam local deformation",
          "Formula": "K1 = 3·E·I_b / L_b³",
@@ -114,9 +115,10 @@ def components(inp: CBFEMInputs) -> List[Dict]:
          "Working": f"{G:.0f} × {inp.A_h:g} / {inp.L_h:g}",
          "K": G * inp.A_h / inp.L_h},
         {"C": "C4", "Component": "Hook–upright bearing",
-         "Formula": "K4 = F / (θ_available × H_b)",
-         "Working": f"{inp.F_kN * 1000:g} / ({inp.theta_avail:g} × {H_b(inp):g})",
-         "K": K4_N_per_mm(inp)},
+         "Formula": "K4 = F / θ_available (kN/rad)",
+         "Working": f"{inp.F_kN:g} kN / {inp.theta_avail:g} rad = "
+                    f"{K4_kN_per_rad(inp):,.4f} kN/rad",
+         "K": K4_kN_per_rad(inp) * 1000.0},             # N/rad in the sum
         {"C": "C5", "Component": "Upright local deformation",
          "Formula": "K5 = 3·E·I_u / L_u³",
          "Working": f"3 × {E:.0f} × {inp.I_u:g} / {inp.L_u:g}³",
@@ -169,10 +171,20 @@ def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
     S_j = S_ini / ETA
     limit = 0.5 * E * I_b / inp.L_b
 
-    # ---- 3. the test stops at the max load ----
-    F = P_max                                         # P_stop
+    # ---- 3. load P_stop at which D1 reaches d_max ----
+    # At the stop point the secant is S_j = S_j,ini / 2: theta_stop = 2 P a / S_j,ini.
+    def D1_stop(P):
+        return D_at(a, P, 2.0 * P * a / S_ini, I_b)
 
-    # ---- 4. virtual test: load steps from 0 up to the max load ----
+    lo, hi = 0.0, max(P_max, 1.0)
+    while D1_stop(hi) < d_max:
+        hi *= 2.0
+    for _ in range(200):                              # bisection: D1 rises with P
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if D1_stop(mid) < d_max else (lo, mid)
+    F = hi                                            # P_stop
+
+    # ---- 4. virtual test: load steps from 0 until D1 = delta_max ----
     M_max = F * a
     inc = increment_kN * 1000.0
     if inc <= 0 or F / inc > 200_000:
@@ -186,11 +198,11 @@ def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
                 "D3": D_at(X_D3, P, th, I_b)}
 
     rows: List[Dict] = []
-    i = 0
-    while i * inc < F - 1e-9:                         # 0, inc, 2·inc, … below the max load
-        rows.append(state(i * inc))
-        i += 1
-    rows.append(state(F))                             # stop: P = max load
+    P = 0.0
+    while P < F:
+        rows.append(state(P))
+        P += inc
+    rows.append(state(F))                             # stop: D1 = delta_max
 
     rec = {k: [r[k] for r in rows] for k in ("P", "M", "theta", "D1", "D2", "D3")}
     rec["step"] = list(range(len(rows)))
@@ -202,9 +214,8 @@ def run(inp: CBFEMInputs, increment_kN: float) -> Dict:
         "F_K4_kN": inp.F_kN,
         "P_max": P_max,
         "delta_max": d_max,
-        "P_stop": F,                                  # N, = max load (test stop)
-        "K4": K4_N_per_mm(inp),                       # N/mm
-        "delta_bearing": inp.theta_avail * hb,        # mm
+        "P_stop": F,                                  # N, load noted when D1 = delta_max
+        "K4_kN_rad": K4_kN_per_rad(inp),
         "h": h,
         "sum_inv_K": sum_inv_K,
         "K_total": K_total,
